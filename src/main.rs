@@ -28,6 +28,15 @@ fn main() -> std::io::Result<()> {
                 buf.resize(packet_size_bytes, 0);
 
                 loop {
+                    if Instant::now().saturating_duration_since(begin)
+                        > Duration::from_millis(next_action_time_ms)
+                    {
+                        println!(
+                            "Socket send took too much time! ({} > 1000)",
+                            Instant::now().saturating_duration_since(begin).as_micros()
+                        );
+                    }
+
                     while Instant::now().saturating_duration_since(begin)
                         < Duration::from_millis(next_action_time_ms)
                     {}
@@ -56,9 +65,9 @@ fn main() -> std::io::Result<()> {
 
                     let now = Instant::now();
                     println!(
-                        "{:?};{:?};{};{}",
-                        now.saturating_duration_since(begin),
-                        now.saturating_duration_since(last_rx_time),
+                        "{};{};{};{}",
+                        now.saturating_duration_since(begin).as_nanos(),
+                        now.saturating_duration_since(last_rx_time).as_nanos(),
                         number_of_bytes,
                         src_addr
                     );
