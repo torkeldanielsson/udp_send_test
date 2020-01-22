@@ -51,7 +51,7 @@ fn main() -> std::io::Result<()> {
                     .parse::<u16>()
                     .expect("Failed to parse destination port");
 
-                let socket = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], listen_port)))?;
+                let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], listen_port)))?;
                 socket
                     .set_read_timeout(None)
                     .expect("set_read_timeout call failed");
