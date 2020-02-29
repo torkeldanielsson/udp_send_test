@@ -2,14 +2,15 @@
 
 use anyhow::{anyhow, Result};
 use glium::{Display, Surface};
-use imgui::{im_str, ColorEdit, Condition, Context, FontSource, StyleColor, Ui, Window};
+use imgui::{im_str, Condition, Context, FontSource, Ui, Window};
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use image;
 use std::env;
 use std::net::{SocketAddr, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant};
-use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::{dpi::{LogicalPosition, LogicalSize, PhysicalPosition}, platform::desktop::EventLoopExtDesktop};
 
 #[derive(Debug)]
 struct State {
@@ -20,6 +21,8 @@ struct State {
     panning: bool,
     auto_pan: bool,
     scroll_factor: f64,
+
+    alt_pressed: bool,
 
     quit: bool,
     fullscreen: bool,
@@ -37,6 +40,7 @@ impl State {
             panning: false,
             auto_pan: true,
             scroll_factor: 2.2,
+            alt_pressed: false,
             quit: false,
             fullscreen: false,
             port: port,
@@ -45,7 +49,7 @@ impl State {
     }
 }
 
-fn draw_gui(ui: &Ui, state: &mut State) {
+fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window) {
     let view_size = ui.io().display_size;
     let mut scale = f64::exp(state.scroll_factor as f64);
 
@@ -72,8 +76,8 @@ fn draw_gui(ui: &Ui, state: &mut State) {
                     let dx = state.last_mouse_state.pos.0 - state.mouse_state.pos.0;
                     let dy = state.last_mouse_state.pos.1 - state.mouse_state.pos.1;
 
-                    state.pan[0] += dx;
-                    state.pan[1] += dy;
+                    state.pan[0] += dx * platform_window.scale_factor() as f64;
+                    state.pan[1] += dy * platform_window.scale_factor() as f64;
 
                     if (dx, dy) != (0.0, 0.0) {
                         state.auto_pan = false;
@@ -131,10 +135,12 @@ impl MouseState {
 
 fn main() -> Result<()> {
     let mut last_frame = Instant::now();
-    let mut events_loop = winit::EventsLoop::new();
+    let mut event_loop = winit::event_loop::EventLoop::new();
 
     let display = {
-        let icon_data = include_bytes!("../32.png");
+        let icon_data = image::load_from_memory(include_bytes!("../32.png"))
+            .unwrap()
+            .into_rgba();
 
         let context = glium::glutin::ContextBuilder::new()
             .with_gl_profile(glium::glutin::GlProfile::Core)
@@ -144,11 +150,18 @@ fn main() -> Result<()> {
                 glium::glutin::Api::OpenGl,
                 (4, 3),
             ));
-        let window = winit::WindowBuilder::new()
-            .with_title("UdpTest")
-            .with_dimensions(LogicalSize::new(800.0, 334.0))
-            .with_window_icon(Some(winit::Icon::from_bytes(icon_data).unwrap()));
-        Display::new(window, context, &events_loop).unwrap()
+        let window = winit::window::WindowBuilder::new()
+            .with_title("Udp Test")
+            .with_inner_size(LogicalSize::new(800.0, 334.0))
+            .with_window_icon(Some(
+                winit::window::Icon::from_rgba(
+                    (&*icon_data).to_owned(),
+                    icon_data.width(),
+                    icon_data.height(),
+                )
+                .unwrap(),
+            ));
+        Display::new(window, context, &event_loop).unwrap()
     };
 
     let gl_window = display.gl_window();
@@ -192,18 +205,29 @@ fn main() -> Result<()> {
 
         let mut new_absolute_mouse_pos = None;
 
-        events_loop.poll_events(|event| {
-            use winit::{
-                DeviceEvent, ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent,
+        let mut change_fullscreen = false;
+        let mut new_fullscreen_mode = None;
+
+        event_loop.run_return(|event, _, control_flow| {
+            use winit::event::{
+                DeviceEvent, ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent, KeyboardInput
             };
+
+            *control_flow = winit::event_loop::ControlFlow::Exit;
 
             platform.handle_event(imgui.io_mut(), &window, &event);
 
             match event {
                 Event::DeviceEvent { event, .. } => match event {
-                    DeviceEvent::MouseMotion { delta: (x, y), .. } => {
-                        state.mouse_state.pos.0 += x / window.get_hidpi_factor();
-                        state.mouse_state.pos.1 += y / window.get_hidpi_factor();
+                    DeviceEvent::MouseMotion { delta: (px, py), .. } => {
+
+                        let LogicalPosition::<f64> { x: lx, y: ly } = PhysicalPosition { x: px, y: py }.to_logical(window.scale_factor());
+
+                        state.mouse_state.pos.0 += lx;
+                        state.mouse_state.pos.1 += ly;
+                    }
+                    DeviceEvent::ModifiersChanged(modifiers_changed) => {
+                        state.alt_pressed = modifiers_changed.alt()
                     }
                     _ => (),
                 },
@@ -211,25 +235,28 @@ fn main() -> Result<()> {
                     WindowEvent::CloseRequested => {
                         state.quit = true;
                     }
-                    WindowEvent::Resized(logical_size) => {
+                    WindowEvent::Resized(physical_size) => {
                         display
                             .gl_window()
-                            .resize(logical_size.to_physical(window.get_hidpi_factor()));
+                            .resize(physical_size);
                     }
-                    WindowEvent::KeyboardInput { input, .. } => {
-                        use glium::glutin::VirtualKeyCode as Key;
+                    WindowEvent::KeyboardInput { device_id: _, input: KeyboardInput { state: key_state, virtual_keycode, .. }, is_synthetic: _ } => {
+                        use winit::event::VirtualKeyCode as Key;
 
-                        let pressed = input.state == ElementState::Pressed;
+                        let pressed = key_state == ElementState::Pressed;
 
-                        match input.virtual_keycode {
+                        match virtual_keycode {
                             Some(Key::Return) => {
-                                if pressed && input.modifiers.alt {
+                                if pressed && state.alt_pressed {
                                     let monitor = if state.fullscreen {
                                         None
                                     } else {
-                                        Some(window.get_current_monitor())
+                                        Some(window.current_monitor())
                                     };
-                                    window.set_fullscreen(monitor);
+
+                                    new_fullscreen_mode = monitor.map(|monitor| winit::window::Fullscreen::Borderless(monitor));
+                                    change_fullscreen = true;
+
                                     state.fullscreen = !state.fullscreen;
                                 }
                             }
@@ -242,9 +269,10 @@ fn main() -> Result<()> {
                         }
                     }
                     WindowEvent::CursorMoved {
-                        position: LogicalPosition { x, y },
+                        position,
                         ..
                     } => {
+                        let LogicalPosition { x, y } = position.to_logical(window.scale_factor());
                         new_absolute_mouse_pos = Some((x, y));
                     }
                     WindowEvent::MouseInput {
@@ -291,6 +319,10 @@ fn main() -> Result<()> {
             }
         });
 
+        if change_fullscreen {
+            window.set_fullscreen(new_fullscreen_mode);
+        }
+
         if !state.mouse_state.pressed.0 {
             if let Some(pos) = new_absolute_mouse_pos {
                 state.mouse_state.pos = pos;
@@ -321,7 +353,7 @@ fn main() -> Result<()> {
 
         {
             let ui = imgui.frame();
-            draw_gui(&ui, &mut state);
+            draw_gui(&ui, &mut state, &window);
 
             let mut target = display.draw();
             target.clear_color(0.12, 0.12, 0.12, 1.0);
