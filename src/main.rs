@@ -10,7 +10,9 @@ use image;
 use imgui::*;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::net::IpAddr;
+use std::str::FromStr;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,21 +38,30 @@ struct State {
 
     link: Link,
     link_mode: LinkMode,
-    port: u16,
-    address: String,
+    target_port: i32,
+    target_ip: ImString,
+    bind_ip: ImString,
     packet_size: i32,
     rx: mpsc::Receiver<LinkPacketData>,
     send_interval_us: i32,
 }
 
 impl State {
-    fn new(
-        link_mode: LinkMode,
-        port: u16,
-        address: String,
-        packet_size: i32,
-        send_interval_us: i32,
-    ) -> State {
+    fn new() -> State {
+        // defaults:
+        let target_port = 5005;
+        let target_ip = "127.0.0.1";
+        let bind_ip = "0.0.0.0";
+        let link_mode = LinkMode::Rx;
+        let packet_size = 500;
+        let send_interval_us = 1000;
+
+        let mut im_string_target_ip = ImString::new(target_ip);
+        im_string_target_ip.reserve(128);
+
+        let mut im_string_bind_ip = ImString::new(bind_ip);
+        im_string_bind_ip.reserve(128);
+
         let (tx, rx) = mpsc::channel();
 
         State {
@@ -65,16 +76,17 @@ impl State {
             fullscreen: false,
             link: Link::new(
                 link_mode.clone(),
-                &address,
-                port,
+                &bind_ip,
+                0,
                 packet_size,
                 tx,
                 send_interval_us,
             )
             .expect("error creating link"),
             link_mode: link_mode,
-            port: port,
-            address: address,
+            target_port: target_port,
+            target_ip: im_string_target_ip,
+            bind_ip: im_string_bind_ip,
             packet_size: packet_size,
             rx: rx,
             send_interval_us: send_interval_us,
@@ -192,24 +204,67 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                     .collapsible(false)
                     .focused(true)
                     .build(ui, || {
-                        if let Some(combo_token) = ComboBox::new(im_str!("Mode")).begin(ui) {
-                            if Selectable::new(im_str!("Tx"))
-                                .selected(state.link_mode == LinkMode::Tx)
-                                .build(ui)
-                            {
-                                state.link_mode = LinkMode::Tx;
+                        {
+                            // OMG, why does combo boxes not work?!
+                            // if let Some(combo_token) = ComboBox::new(im_str!("Mode")).begin(ui) {
+                            //     if Selectable::new(im_str!("Tx"))
+                            //         .selected(state.link_mode == LinkMode::Tx)
+                            //         .build(ui)
+                            //     {
+                            //         state.link_mode = LinkMode::Tx;
+                            //     }
+                            //     if Selectable::new(im_str!("Rx"))
+                            //         .selected(state.link_mode == LinkMode::Rx)
+                            //         .build(ui)
+                            //     {
+                            //         state.link_mode = LinkMode::Rx;
+                            //     }
+                            //     combo_token.end(ui);
+                            // }
+
+                            match state.link_mode {
+                                LinkMode::Tx => {
+                                    ui.text(im_str!("Mode: Tx"));
+                                    if ui.small_button(im_str!("Change to Rx")) {
+                                        state.link_mode = LinkMode::Rx;
+                                    }
+                                }
+                                LinkMode::Rx => {
+                                    ui.text(im_str!("Mode: Rx"));
+                                    if ui.small_button(im_str!("Change to Tx")) {
+                                        state.link_mode = LinkMode::Tx;
+                                    }
+                                }
                             }
-                            if Selectable::new(im_str!("Rx"))
-                                .selected(state.link_mode == LinkMode::Rx)
-                                .build(ui)
-                            {
-                                state.link_mode = LinkMode::Rx;
-                            }
-                            combo_token.end(ui);
                         }
 
+                        match state.link_mode {
+                            LinkMode::Tx => {
+                                ui.input_text(im_str!("Destination IP"), &mut state.target_ip)
+                                    .build();
+                                ui.drag_int(im_str!("Destination Port"), &mut state.target_port)
+                                    .min(1)
+                                    .max(65535)
+                                    .build();
+                            }
+                            LinkMode::Rx => {
+                                ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
+                                    .build();
+                            }
+                        }
+
+                        let address_and_port_ok = match state.link_mode {
+                            LinkMode::Tx => {
+                                state.target_ip.to_str() == state.link.address
+                                    && state.target_port as u16 == state.link.port
+                            }
+                            LinkMode::Rx => {
+                                state.bind_ip.to_str() == state.link.address && 0 == state.link.port
+                            }
+                        };
+
                         if state.link_mode != state.link.link_mode
-                            || state.address != state.link.address
+                            || !address_and_port_ok
                             || state.packet_size != state.link.packet_size
                             || state.send_interval_us != state.link.send_interval_us
                         {
@@ -222,15 +277,29 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
 
                             state.rx = rx;
 
-                            state.link = Link::new(
-                                state.link_mode.clone(),
-                                &state.address,
-                                state.port,
-                                state.packet_size,
-                                tx,
-                                state.send_interval_us,
-                            )
-                            .expect("error creating link");
+                            let (ip, port) = match state.link_mode {
+                                LinkMode::Tx => (state.target_ip.to_str(), state.target_port),
+                                LinkMode::Rx => (state.bind_ip.to_str(), 0),
+                            };
+
+                            match IpAddr::from_str(ip) {
+                                Ok(_) => {
+                                    match Link::new(
+                                        state.link_mode.clone(),
+                                        ip,
+                                        port as u16,
+                                        state.packet_size,
+                                        tx,
+                                        state.send_interval_us,
+                                    ) {
+                                        Ok(link) => {
+                                            state.link = link;
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                                Err(_) => {}
+                            }
                         }
                     });
 
@@ -320,7 +389,7 @@ fn main() -> Result<()> {
 
     let mut renderer = Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
-    let mut state = State::new(LinkMode::Rx, 5005, "0.0.0.0".to_owned(), 500, 1000);
+    let mut state = State::new();
 
     loop {
         state.last_mouse_state = state.mouse_state;
@@ -508,6 +577,11 @@ fn main() -> Result<()> {
                 thread::yield_now();
             }
         }
+    }
+
+    state.link.run.store(false, Ordering::SeqCst);
+    if let Some(thread) = state.link.thread.take() {
+        thread.join().ok();
     }
 
     Ok(())
