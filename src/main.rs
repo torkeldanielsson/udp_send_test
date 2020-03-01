@@ -51,8 +51,6 @@ struct State {
 
     difference_data: Vec<f64>,
     largest_diff: f64,
-
-    debug_pls: bool,
 }
 
 impl State {
@@ -79,6 +77,7 @@ impl State {
             link_mode.clone(),
             &bind_ip,
             bind_port as u16,
+            &target_ip,
             target_port as u16,
             packet_size,
             tx.clone(),
@@ -91,8 +90,9 @@ impl State {
                 link_mode = LinkMode::Tx;
                 link = Link::new(
                     link_mode.clone(),
-                    &target_ip,
+                    &bind_ip,
                     0,
+                    &target_ip,
                     target_port as u16,
                     packet_size,
                     tx,
@@ -125,7 +125,6 @@ impl State {
             link_data: Vec::new(),
             difference_data: Vec::new(),
             largest_diff: 0.0,
-            debug_pls: false,
         }
     }
 }
@@ -208,15 +207,6 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                 let mut index = 1;
                 let mut diff = state.link_data[1].t - state.link_data[0].t;
 
-                if state.debug_pls {
-                    println!("{:?}", state.link_data);
-                    println!("{:?}", n);
-                    println!(
-                        "t_data_min: {:?}, t_data_max: {:?}, t_data_diff: {}",
-                        t_data_min, t_data_max, t_data_diff
-                    );
-                }
-
                 while x < view_size[0] {
                     let t: f64 = ((x - 400.0) / (view_size[0] - 400.0)) as f64;
 
@@ -224,15 +214,14 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
 
                     if current_data_t >= state.link_data[index].t && current_data_t < t_data_max {
                         diff = 0.0;
-                        let mut count = 0.0;
 
                         while state.link_data[index].t < current_data_t {
-                            diff += state.link_data[index + 1].t - state.link_data[index].t;
-                            count += 1.0;
+                            let tmp_diff = state.link_data[index + 1].t - state.link_data[index].t;
+                            if tmp_diff > diff {
+                                diff = tmp_diff;
+                            }
                             index += 1;
                         }
-
-                        diff /= count as f64;
                     }
 
                     draw_list
@@ -240,20 +229,14 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                             [x, view_size[1]],
                             [
                                 x,
-                                ((diff / state.largest_diff) * view_size[1] as f64) as f32,
+                                view_size[1] - ((diff / state.largest_diff) as f32) * view_size[1],
                             ],
                             [0.2, 0.65, 0.3, 1.0],
                         )
                         .build();
 
-                    if state.debug_pls {
-                        println!("x: {}, t: {}, diff: {}", x, t, diff);
-                    }
-
                     x += 1.0;
                 }
-
-                state.debug_pls = false;
             }
 
             {
@@ -338,6 +321,9 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                 }
                             }
 
+                            ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
+                                .build();
+
                             match state.link_mode {
                                 LinkMode::Tx => {
                                     ui.input_text(im_str!("Destination IP"), &mut state.target_ip)
@@ -351,8 +337,6 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                     .build();
                                 }
                                 LinkMode::Rx => {
-                                    ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
-                                        .build();
                                     ui.drag_int(im_str!("Bind Port"), &mut state.bind_port)
                                         .min(1)
                                         .max(65535)
@@ -362,11 +346,12 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
 
                             let address_and_port_ok = match state.link_mode {
                                 LinkMode::Tx => {
-                                    state.target_ip.to_str() == state.link.address
+                                    state.target_ip.to_str() == state.link.target_address
                                         && state.target_port as u16 == state.link.target_port
+                                        && state.bind_ip.to_str() == state.link.bind_address
                                 }
                                 LinkMode::Rx => {
-                                    state.bind_ip.to_str() == state.link.address
+                                    state.bind_ip.to_str() == state.link.bind_address
                                         && state.bind_port as u16 == state.link.bind_port
                                 }
                             };
@@ -390,20 +375,23 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                 state.difference_data = Vec::new();
                                 state.largest_diff = 0.0;
 
-                                let (ip, bind_port, target_port) = match state.link_mode {
-                                    LinkMode::Tx => {
-                                        (state.target_ip.to_str(), 0, state.target_port)
-                                    }
-                                    LinkMode::Rx => (state.bind_ip.to_str(), state.bind_port, 0),
+                                let bind_port = match state.link_mode {
+                                    LinkMode::Tx => 0,
+
+                                    LinkMode::Rx => state.bind_port,
                                 };
 
-                                match IpAddr::from_str(ip) {
-                                    Ok(_) => {
+                                match (
+                                    IpAddr::from_str(state.bind_ip.to_str()),
+                                    IpAddr::from_str(state.target_ip.to_str()),
+                                ) {
+                                    (Ok(_), Ok(_)) => {
                                         match Link::new(
                                             state.link_mode.clone(),
-                                            ip,
+                                            state.bind_ip.to_str(),
                                             bind_port as u16,
-                                            target_port as u16,
+                                            state.target_ip.to_str(),
+                                            state.target_port as u16,
                                             state.packet_size,
                                             tx,
                                             state.send_interval_us,
@@ -415,7 +403,7 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                             Err(_) => {}
                                         }
                                     }
-                                    Err(_) => {}
+                                    _ => {}
                                 }
                             }
                         }
@@ -432,16 +420,21 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                     ui.text(&im_string);
                                 }
                                 LinkMode::Rx => {
-                                    let im_string = ImString::new(format!(
-                                        "Received Packets: {}",
-                                        state.link_data.len()
-                                    ));
-                                    ui.text(&im_string);
+                                    {
+                                        let im_string = ImString::new(format!(
+                                            "Received Packets: {}",
+                                            state.link_data.len()
+                                        ));
+                                        ui.text(&im_string);
+                                    }
+                                    {
+                                        let im_string = ImString::new(format!(
+                                            "Max diff: {}",
+                                            state.largest_diff
+                                        ));
+                                        ui.text(&im_string);
+                                    }
                                 }
-                            }
-
-                            if ui.small_button(im_str!("Debug pls")) {
-                                state.debug_pls = true;
                             }
                         }
                     });

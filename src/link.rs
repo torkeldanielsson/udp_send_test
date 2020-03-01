@@ -18,8 +18,9 @@ pub struct Link {
     pub run: Arc<AtomicBool>,
     pub thread: Option<JoinHandle<()>>,
     pub link_mode: LinkMode,
-    pub address: String,
+    pub bind_address: String,
     pub bind_port: u16,
+    pub target_address: String,
     pub target_port: u16,
     pub packet_size: i32,
     pub send_interval_us: i32,
@@ -34,8 +35,9 @@ pub struct LinkPacketData {
 impl Link {
     pub fn new(
         link_mode: LinkMode,
-        address: &str,
+        bind_address: &str,
         bind_port: u16,
+        target_address: &str,
         target_port: u16,
         packet_size: i32,
         tx: mpsc::Sender<LinkPacketData>,
@@ -44,8 +46,11 @@ impl Link {
         let run = Arc::new(AtomicBool::new(true));
         let run_thread = run.clone();
 
-        let bind_addr = SocketAddr::new(IpAddr::from_str(&address).expect("error"), bind_port);
-        let target_addr = SocketAddr::new(IpAddr::from_str(&address).expect("error"), target_port);
+        let bind_addr = SocketAddr::new(IpAddr::from_str(&bind_address).expect("error"), bind_port);
+        let target_addr = SocketAddr::new(
+            IpAddr::from_str(&target_address).expect("error"),
+            target_port,
+        );
 
         let sock = UdpSocket::bind(bind_addr)?;
         sock.set_read_timeout(Some(Duration::from_millis(100)))?;
@@ -124,8 +129,9 @@ impl Link {
             run: run,
             thread: Some(thread),
             link_mode: link_mode,
-            address: address.to_owned(),
+            bind_address: bind_address.to_owned(),
             bind_port: bind_port,
+            target_address: target_address.to_owned(),
             target_port: target_port,
             packet_size: packet_size,
             send_interval_us: send_interval_us,
