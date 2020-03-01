@@ -1,16 +1,23 @@
 #![windows_subsystem = "windows"]
 
+mod link;
+
+use link::{Link, LinkMode, LinkPacketData};
+
 use anyhow::{anyhow, Result};
 use glium::{Display, Surface};
-use imgui::{im_str, Condition, Context, FontSource, Ui, Window};
+use image;
+use imgui::*;
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use image;
-use std::env;
-use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
-use winit::{dpi::{LogicalPosition, LogicalSize, PhysicalPosition}, platform::desktop::EventLoopExtDesktop};
+use winit::{
+    dpi::{LogicalPosition, LogicalSize, PhysicalPosition},
+    platform::desktop::EventLoopExtDesktop,
+};
 
 #[derive(Debug)]
 struct State {
@@ -27,12 +34,25 @@ struct State {
     quit: bool,
     fullscreen: bool,
 
+    link: Link,
+    link_mode: LinkMode,
     port: u16,
     address: String,
+    packet_size: i32,
+    rx: mpsc::Receiver<LinkPacketData>,
+    send_interval_us: i32,
 }
 
 impl State {
-    fn new(port: u16, address: String) -> State {
+    fn new(
+        link_mode: LinkMode,
+        port: u16,
+        address: String,
+        packet_size: i32,
+        send_interval_us: i32,
+    ) -> State {
+        let (tx, rx) = mpsc::channel();
+
         State {
             mouse_state: MouseState::new(),
             last_mouse_state: MouseState::new(),
@@ -43,8 +63,21 @@ impl State {
             alt_pressed: false,
             quit: false,
             fullscreen: false,
+            link: Link::new(
+                link_mode.clone(),
+                &address,
+                port,
+                packet_size,
+                tx,
+                send_interval_us,
+            )
+            .expect("error creating link"),
+            link_mode: link_mode,
             port: port,
             address: address,
+            packet_size: packet_size,
+            rx: rx,
+            send_interval_us: send_interval_us,
         }
     }
 }
@@ -113,6 +146,96 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                     state.pan[0] += state.mouse_state.wheel.0 as f64;
                 }
             }
+
+            {
+                let style_colors = ui.push_style_colors(&[
+                    (
+                        StyleColor::Text,
+                        [0.980000019, 0.664439976, 0.303800017, 1.0],
+                    ),
+                    (
+                        StyleColor::CheckMark,
+                        [0.980000019, 0.664439976, 0.303800017, 1.0],
+                    ),
+                    (StyleColor::WindowBg, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::FrameBg, [1.0, 1.0, 1.0, 0.14]),
+                    (StyleColor::SliderGrabActive, [0.9, 0.9, 0.9, 0.80]),
+                    (StyleColor::PopupBg, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::ScrollbarBg, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::TitleBg, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::TitleBgActive, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::TitleBgCollapsed, [0.2, 0.2, 0.2, 1.0]),
+                    (StyleColor::MenuBarBg, [0.165, 0.165, 0.165, 1.0]),
+                    (StyleColor::Border, [0.314, 0.314, 0.314, 1.0]),
+                    (StyleColor::BorderShadow, [0.0, 0.0, 0.0, 0.0]),
+                    (StyleColor::SliderGrab, [0.6, 0.6, 0.6, 0.8]),
+                    (StyleColor::SliderGrabActive, [0.9, 0.9, 0.9, 0.8]),
+                    (StyleColor::ScrollbarGrab, [0.6, 0.6, 0.6, 0.8]),
+                    (StyleColor::ScrollbarGrabActive, [0.9, 0.9, 0.9, 0.8]),
+                    (StyleColor::ScrollbarGrabHovered, [0.6, 0.6, 0.6, 0.8]),
+                    (StyleColor::Header, [0.15, 0.15, 0.15, 0.8]),
+                    (StyleColor::HeaderActive, [0.4, 0.27, 0.13, 1.0]),
+                    (StyleColor::HeaderHovered, [0.3, 0.2, 0.09, 1.0]),
+                    (StyleColor::Button, [0.15, 0.15, 0.15, 0.8]),
+                    (StyleColor::ButtonActive, [0.4, 0.27, 0.13, 1.0]),
+                    (StyleColor::ButtonHovered, [0.3, 0.2, 0.09, 1.0]),
+                    (StyleColor::FrameBgActive, [0.4, 0.27, 0.13, 1.0]),
+                    (StyleColor::FrameBgHovered, [0.3, 0.2, 0.09, 1.0]),
+                ]);
+
+                Window::new(im_str!("Properties"))
+                    .size([400.0, view_size[1]], Condition::Always)
+                    .position([0.0, 0.0], Condition::Always)
+                    .movable(false)
+                    .resizable(false)
+                    .title_bar(false)
+                    .collapsible(false)
+                    .focused(true)
+                    .build(ui, || {
+                        if let Some(combo_token) = ComboBox::new(im_str!("Mode")).begin(ui) {
+                            if Selectable::new(im_str!("Tx"))
+                                .selected(state.link_mode == LinkMode::Tx)
+                                .build(ui)
+                            {
+                                state.link_mode = LinkMode::Tx;
+                            }
+                            if Selectable::new(im_str!("Rx"))
+                                .selected(state.link_mode == LinkMode::Rx)
+                                .build(ui)
+                            {
+                                state.link_mode = LinkMode::Rx;
+                            }
+                            combo_token.end(ui);
+                        }
+
+                        if state.link_mode != state.link.link_mode
+                            || state.address != state.link.address
+                            || state.packet_size != state.link.packet_size
+                            || state.send_interval_us != state.link.send_interval_us
+                        {
+                            state.link.run.store(false, Ordering::SeqCst);
+                            if let Some(thread) = state.link.thread.take() {
+                                thread.join().ok();
+                            }
+
+                            let (tx, rx) = mpsc::channel();
+
+                            state.rx = rx;
+
+                            state.link = Link::new(
+                                state.link_mode.clone(),
+                                &state.address,
+                                state.port,
+                                state.packet_size,
+                                tx,
+                                state.send_interval_us,
+                            )
+                            .expect("error creating link");
+                        }
+                    });
+
+                style_colors.pop(&ui);
+            }
         });
 }
 
@@ -152,7 +275,7 @@ fn main() -> Result<()> {
             ));
         let window = winit::window::WindowBuilder::new()
             .with_title("Udp Test")
-            .with_inner_size(LogicalSize::new(800.0, 334.0))
+            .with_inner_size(LogicalSize::new(720.0, 480.0))
             .with_window_icon(Some(
                 winit::window::Icon::from_rgba(
                     (&*icon_data).to_owned(),
@@ -197,7 +320,7 @@ fn main() -> Result<()> {
 
     let mut renderer = Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
-    let mut state = State::new(5005, "0.0.0.0".to_owned());
+    let mut state = State::new(LinkMode::Rx, 5005, "0.0.0.0".to_owned(), 500, 1000);
 
     loop {
         state.last_mouse_state = state.mouse_state;
@@ -210,7 +333,8 @@ fn main() -> Result<()> {
 
         event_loop.run_return(|event, _, control_flow| {
             use winit::event::{
-                DeviceEvent, ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent, KeyboardInput
+                DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta,
+                WindowEvent,
             };
 
             *control_flow = winit::event_loop::ControlFlow::Exit;
@@ -219,9 +343,11 @@ fn main() -> Result<()> {
 
             match event {
                 Event::DeviceEvent { event, .. } => match event {
-                    DeviceEvent::MouseMotion { delta: (px, py), .. } => {
-
-                        let LogicalPosition::<f64> { x: lx, y: ly } = PhysicalPosition { x: px, y: py }.to_logical(window.scale_factor());
+                    DeviceEvent::MouseMotion {
+                        delta: (px, py), ..
+                    } => {
+                        let LogicalPosition::<f64> { x: lx, y: ly } =
+                            PhysicalPosition { x: px, y: py }.to_logical(window.scale_factor());
 
                         state.mouse_state.pos.0 += lx;
                         state.mouse_state.pos.1 += ly;
@@ -236,11 +362,18 @@ fn main() -> Result<()> {
                         state.quit = true;
                     }
                     WindowEvent::Resized(physical_size) => {
-                        display
-                            .gl_window()
-                            .resize(physical_size);
+                        display.gl_window().resize(physical_size);
                     }
-                    WindowEvent::KeyboardInput { device_id: _, input: KeyboardInput { state: key_state, virtual_keycode, .. }, is_synthetic: _ } => {
+                    WindowEvent::KeyboardInput {
+                        device_id: _,
+                        input:
+                            KeyboardInput {
+                                state: key_state,
+                                virtual_keycode,
+                                ..
+                            },
+                        is_synthetic: _,
+                    } => {
                         use winit::event::VirtualKeyCode as Key;
 
                         let pressed = key_state == ElementState::Pressed;
@@ -254,7 +387,9 @@ fn main() -> Result<()> {
                                         Some(window.current_monitor())
                                     };
 
-                                    new_fullscreen_mode = monitor.map(|monitor| winit::window::Fullscreen::Borderless(monitor));
+                                    new_fullscreen_mode = monitor.map(|monitor| {
+                                        winit::window::Fullscreen::Borderless(monitor)
+                                    });
                                     change_fullscreen = true;
 
                                     state.fullscreen = !state.fullscreen;
@@ -268,10 +403,7 @@ fn main() -> Result<()> {
                             _ => {}
                         }
                     }
-                    WindowEvent::CursorMoved {
-                        position,
-                        ..
-                    } => {
+                    WindowEvent::CursorMoved { position, .. } => {
                         let LogicalPosition { x, y } = position.to_logical(window.scale_factor());
                         new_absolute_mouse_pos = Some((x, y));
                     }
@@ -376,89 +508,6 @@ fn main() -> Result<()> {
                 thread::yield_now();
             }
         }
-    }
-
-    let args: Vec<String> = env::args().collect();
-
-    let mut print_usage_instructions = args.len() != 3;
-
-    let send_interval_us = 1000;
-    let packet_size_bytes = 500;
-
-    if !print_usage_instructions {
-        let mode: &str = &args[1];
-
-        match mode.as_ref() {
-            "tx" => {
-                let destination = &args[2];
-
-                println!("sending to {}", destination);
-
-                let socket = UdpSocket::bind("0.0.0.0:0").expect("Couldn't bind to address");
-                socket.connect(destination).expect("connection failed");
-                let begin = Instant::now();
-                let mut next_action_time_ms = 1;
-
-                let mut buf: Vec<u8> = Vec::new();
-                buf.resize(packet_size_bytes, 0);
-
-                loop {
-                    if Instant::now().saturating_duration_since(begin)
-                        > Duration::from_millis(next_action_time_ms)
-                    {
-                        println!(
-                            "Socket send took too much time! ({} > 1000)",
-                            Instant::now().saturating_duration_since(begin).as_micros()
-                        );
-                    }
-
-                    while Instant::now().saturating_duration_since(begin)
-                        < Duration::from_millis(next_action_time_ms)
-                    {}
-
-                    next_action_time_ms += 1;
-
-                    socket.send(&buf)?;
-                }
-            }
-            "rx" => {
-                let listen_port = args[2]
-                    .parse::<u16>()
-                    .expect("Failed to parse destination port");
-
-                let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], listen_port)))?;
-                socket
-                    .set_read_timeout(None)
-                    .expect("set_read_timeout call failed");
-
-                let mut buf = [0; 9000];
-
-                let mut last_rx_time = Instant::now();
-                let begin = Instant::now();
-                loop {
-                    let (number_of_bytes, src_addr) = socket.recv_from(&mut buf)?;
-
-                    let now = Instant::now();
-                    println!(
-                        "{};{};{};{}",
-                        now.saturating_duration_since(begin).as_nanos(),
-                        now.saturating_duration_since(last_rx_time).as_nanos(),
-                        number_of_bytes,
-                        src_addr
-                    );
-                    last_rx_time = now;
-                }
-            }
-            &_ => {
-                print_usage_instructions = true;
-            }
-        }
-    }
-
-    if print_usage_instructions {
-        println!(
-            "This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.
-To use, supply arguments: tx [target_ip:port] or: rx [listen_port]", packet_size_bytes, send_interval_us);
     }
 
     Ok(())
