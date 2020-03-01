@@ -36,14 +36,18 @@ struct State {
     quit: bool,
     fullscreen: bool,
 
+    link_ok: bool,
     link: Link,
     link_mode: LinkMode,
     target_port: i32,
     target_ip: ImString,
+    bind_port: i32,
     bind_ip: ImString,
     packet_size: i32,
     rx: mpsc::Receiver<LinkPacketData>,
     send_interval_us: i32,
+
+    link_data: Vec<LinkPacketData>,
 }
 
 impl State {
@@ -51,8 +55,9 @@ impl State {
         // defaults:
         let target_port = 5005;
         let target_ip = "127.0.0.1";
+        let bind_port = target_port;
         let bind_ip = "0.0.0.0";
-        let link_mode = LinkMode::Rx;
+        let mut link_mode = LinkMode::Rx;
         let packet_size = 500;
         let send_interval_us = 1000;
 
@@ -64,6 +69,34 @@ impl State {
 
         let (tx, rx) = mpsc::channel();
 
+        let link;
+        match Link::new(
+            link_mode.clone(),
+            &bind_ip,
+            bind_port as u16,
+            target_port as u16,
+            packet_size,
+            tx.clone(),
+            send_interval_us,
+        ) {
+            Ok(new_link) => {
+                link = new_link;
+            }
+            Err(_) => {
+                link_mode = LinkMode::Tx;
+                link = Link::new(
+                    link_mode.clone(),
+                    &target_ip,
+                    0,
+                    target_port as u16,
+                    packet_size,
+                    tx,
+                    send_interval_us,
+                )
+                .expect("Failed to create send link too");
+            }
+        }
+
         State {
             mouse_state: MouseState::new(),
             last_mouse_state: MouseState::new(),
@@ -74,22 +107,17 @@ impl State {
             alt_pressed: false,
             quit: false,
             fullscreen: false,
-            link: Link::new(
-                link_mode.clone(),
-                &bind_ip,
-                0,
-                packet_size,
-                tx,
-                send_interval_us,
-            )
-            .expect("error creating link"),
+            link_ok: true,
+            link: link,
             link_mode: link_mode,
             target_port: target_port,
             target_ip: im_string_target_ip,
+            bind_port: bind_port,
             bind_ip: im_string_bind_ip,
             packet_size: packet_size,
             rx: rx,
             send_interval_us: send_interval_us,
+            link_data: Vec::new(),
         }
     }
 }
@@ -250,20 +278,26 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                             LinkMode::Rx => {
                                 ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
                                     .build();
+                                ui.drag_int(im_str!("Bind Port"), &mut state.bind_port)
+                                    .min(1)
+                                    .max(65535)
+                                    .build();
                             }
                         }
 
                         let address_and_port_ok = match state.link_mode {
                             LinkMode::Tx => {
                                 state.target_ip.to_str() == state.link.address
-                                    && state.target_port as u16 == state.link.port
+                                    && state.target_port as u16 == state.link.target_port
                             }
                             LinkMode::Rx => {
-                                state.bind_ip.to_str() == state.link.address && 0 == state.link.port
+                                state.bind_ip.to_str() == state.link.address
+                                    && state.bind_port as u16 == state.link.bind_port
                             }
                         };
 
-                        if state.link_mode != state.link.link_mode
+                        if !state.link_ok
+                            || state.link_mode != state.link.link_mode
                             || !address_and_port_ok
                             || state.packet_size != state.link.packet_size
                             || state.send_interval_us != state.link.send_interval_us
@@ -276,10 +310,12 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                             let (tx, rx) = mpsc::channel();
 
                             state.rx = rx;
+                            state.link_ok = false;
+                            state.link_data = Vec::new();
 
-                            let (ip, port) = match state.link_mode {
-                                LinkMode::Tx => (state.target_ip.to_str(), state.target_port),
-                                LinkMode::Rx => (state.bind_ip.to_str(), 0),
+                            let (ip, bind_port, target_port) = match state.link_mode {
+                                LinkMode::Tx => (state.target_ip.to_str(), 0, state.target_port),
+                                LinkMode::Rx => (state.bind_ip.to_str(), state.bind_port, 0),
                             };
 
                             match IpAddr::from_str(ip) {
@@ -287,13 +323,15 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                                     match Link::new(
                                         state.link_mode.clone(),
                                         ip,
-                                        port as u16,
+                                        bind_port as u16,
+                                        target_port as u16,
                                         state.packet_size,
                                         tx,
                                         state.send_interval_us,
                                     ) {
                                         Ok(link) => {
                                             state.link = link;
+                                            state.link_ok = true;
                                         }
                                         Err(_) => {}
                                     }
@@ -392,6 +430,21 @@ fn main() -> Result<()> {
     let mut state = State::new();
 
     loop {
+        if state.link_ok {
+            loop {
+                match state.rx.recv_timeout(Duration::from_millis(0)) {
+                    Ok(msg) => {
+                        println!("some data pushed: {:?}", &msg);
+
+                        state.link_data.push(msg);
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+        }
+
         state.last_mouse_state = state.mouse_state;
         state.mouse_state.wheel = (0.0, 0.0);
 
