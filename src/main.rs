@@ -48,6 +48,11 @@ struct State {
     send_interval_us: i32,
 
     link_data: Vec<LinkPacketData>,
+
+    difference_data: Vec<f64>,
+    largest_diff: f64,
+
+    debug_pls: bool,
 }
 
 impl State {
@@ -118,6 +123,9 @@ impl State {
             rx: rx,
             send_interval_us: send_interval_us,
             link_data: Vec::new(),
+            difference_data: Vec::new(),
+            largest_diff: 0.0,
+            debug_pls: false,
         }
     }
 }
@@ -187,6 +195,67 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                 }
             }
 
+            if view_size[0] > 400.1 && state.link_data.len() > 2 {
+                let draw_list = ui.get_window_draw_list();
+
+                let mut x = 400.0;
+
+                let t_data_min = state.link_data[0].t;
+                let n = state.link_data.len() - 1;
+                let t_data_max = state.link_data[n].t;
+                let t_data_diff = t_data_max - t_data_min;
+
+                let mut index = 1;
+                let mut diff = state.link_data[1].t - state.link_data[0].t;
+
+                if state.debug_pls {
+                    println!("{:?}", state.link_data);
+                    println!("{:?}", n);
+                    println!(
+                        "t_data_min: {:?}, t_data_max: {:?}, t_data_diff: {}",
+                        t_data_min, t_data_max, t_data_diff
+                    );
+                }
+
+                while x < view_size[0] {
+                    let t: f64 = ((x - 400.0) / (view_size[0] - 400.0)) as f64;
+
+                    let current_data_t = t_data_min + t * t_data_diff;
+
+                    if current_data_t >= state.link_data[index].t && current_data_t < t_data_max {
+                        diff = 0.0;
+                        let mut count = 0.0;
+
+                        while state.link_data[index].t < current_data_t {
+                            diff += state.link_data[index + 1].t - state.link_data[index].t;
+                            count += 1.0;
+                            index += 1;
+                        }
+
+                        diff /= count as f64;
+                    }
+
+                    draw_list
+                        .add_line(
+                            [x, view_size[1]],
+                            [
+                                x,
+                                ((diff / state.largest_diff) * view_size[1] as f64) as f32,
+                            ],
+                            [0.2, 0.65, 0.3, 1.0],
+                        )
+                        .build();
+
+                    if state.debug_pls {
+                        println!("x: {}, t: {}, diff: {}", x, t, diff);
+                    }
+
+                    x += 1.0;
+                }
+
+                state.debug_pls = false;
+            }
+
             {
                 let style_colors = ui.push_style_colors(&[
                     (
@@ -233,110 +302,146 @@ fn draw_gui(ui: &Ui, state: &mut State, platform_window: &winit::window::Window)
                     .focused(true)
                     .build(ui, || {
                         {
-                            // OMG, why does combo boxes not work?!
-                            // if let Some(combo_token) = ComboBox::new(im_str!("Mode")).begin(ui) {
-                            //     if Selectable::new(im_str!("Tx"))
-                            //         .selected(state.link_mode == LinkMode::Tx)
-                            //         .build(ui)
-                            //     {
-                            //         state.link_mode = LinkMode::Tx;
-                            //     }
-                            //     if Selectable::new(im_str!("Rx"))
-                            //         .selected(state.link_mode == LinkMode::Rx)
-                            //         .build(ui)
-                            //     {
-                            //         state.link_mode = LinkMode::Rx;
-                            //     }
-                            //     combo_token.end(ui);
-                            // }
+                            // Manage connection
+
+                            {
+                                // OMG, why does combo boxes not work?!
+                                // if let Some(combo_token) = ComboBox::new(im_str!("Mode")).begin(ui) {
+                                //     if Selectable::new(im_str!("Tx"))
+                                //         .selected(state.link_mode == LinkMode::Tx)
+                                //         .build(ui)
+                                //     {
+                                //         state.link_mode = LinkMode::Tx;
+                                //     }
+                                //     if Selectable::new(im_str!("Rx"))
+                                //         .selected(state.link_mode == LinkMode::Rx)
+                                //         .build(ui)
+                                //     {
+                                //         state.link_mode = LinkMode::Rx;
+                                //     }
+                                //     combo_token.end(ui);
+                                // }
+
+                                match state.link_mode {
+                                    LinkMode::Tx => {
+                                        ui.text(im_str!("Mode: Tx"));
+                                        if ui.small_button(im_str!("Change to Rx")) {
+                                            state.link_mode = LinkMode::Rx;
+                                        }
+                                    }
+                                    LinkMode::Rx => {
+                                        ui.text(im_str!("Mode: Rx"));
+                                        if ui.small_button(im_str!("Change to Tx")) {
+                                            state.link_mode = LinkMode::Tx;
+                                        }
+                                    }
+                                }
+                            }
 
                             match state.link_mode {
                                 LinkMode::Tx => {
-                                    ui.text(im_str!("Mode: Tx"));
-                                    if ui.small_button(im_str!("Change to Rx")) {
-                                        state.link_mode = LinkMode::Rx;
-                                    }
+                                    ui.input_text(im_str!("Destination IP"), &mut state.target_ip)
+                                        .build();
+                                    ui.drag_int(
+                                        im_str!("Destination Port"),
+                                        &mut state.target_port,
+                                    )
+                                    .min(1)
+                                    .max(65535)
+                                    .build();
                                 }
                                 LinkMode::Rx => {
-                                    ui.text(im_str!("Mode: Rx"));
-                                    if ui.small_button(im_str!("Change to Tx")) {
-                                        state.link_mode = LinkMode::Tx;
-                                    }
+                                    ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
+                                        .build();
+                                    ui.drag_int(im_str!("Bind Port"), &mut state.bind_port)
+                                        .min(1)
+                                        .max(65535)
+                                        .build();
                                 }
                             }
-                        }
 
-                        match state.link_mode {
-                            LinkMode::Tx => {
-                                ui.input_text(im_str!("Destination IP"), &mut state.target_ip)
-                                    .build();
-                                ui.drag_int(im_str!("Destination Port"), &mut state.target_port)
-                                    .min(1)
-                                    .max(65535)
-                                    .build();
-                            }
-                            LinkMode::Rx => {
-                                ui.input_text(im_str!("Bind IP"), &mut state.bind_ip)
-                                    .build();
-                                ui.drag_int(im_str!("Bind Port"), &mut state.bind_port)
-                                    .min(1)
-                                    .max(65535)
-                                    .build();
-                            }
-                        }
-
-                        let address_and_port_ok = match state.link_mode {
-                            LinkMode::Tx => {
-                                state.target_ip.to_str() == state.link.address
-                                    && state.target_port as u16 == state.link.target_port
-                            }
-                            LinkMode::Rx => {
-                                state.bind_ip.to_str() == state.link.address
-                                    && state.bind_port as u16 == state.link.bind_port
-                            }
-                        };
-
-                        if !state.link_ok
-                            || state.link_mode != state.link.link_mode
-                            || !address_and_port_ok
-                            || state.packet_size != state.link.packet_size
-                            || state.send_interval_us != state.link.send_interval_us
-                        {
-                            state.link.run.store(false, Ordering::SeqCst);
-                            if let Some(thread) = state.link.thread.take() {
-                                thread.join().ok();
-                            }
-
-                            let (tx, rx) = mpsc::channel();
-
-                            state.rx = rx;
-                            state.link_ok = false;
-                            state.link_data = Vec::new();
-
-                            let (ip, bind_port, target_port) = match state.link_mode {
-                                LinkMode::Tx => (state.target_ip.to_str(), 0, state.target_port),
-                                LinkMode::Rx => (state.bind_ip.to_str(), state.bind_port, 0),
+                            let address_and_port_ok = match state.link_mode {
+                                LinkMode::Tx => {
+                                    state.target_ip.to_str() == state.link.address
+                                        && state.target_port as u16 == state.link.target_port
+                                }
+                                LinkMode::Rx => {
+                                    state.bind_ip.to_str() == state.link.address
+                                        && state.bind_port as u16 == state.link.bind_port
+                                }
                             };
 
-                            match IpAddr::from_str(ip) {
-                                Ok(_) => {
-                                    match Link::new(
-                                        state.link_mode.clone(),
-                                        ip,
-                                        bind_port as u16,
-                                        target_port as u16,
-                                        state.packet_size,
-                                        tx,
-                                        state.send_interval_us,
-                                    ) {
-                                        Ok(link) => {
-                                            state.link = link;
-                                            state.link_ok = true;
-                                        }
-                                        Err(_) => {}
-                                    }
+                            if !state.link_ok
+                                || state.link_mode != state.link.link_mode
+                                || !address_and_port_ok
+                                || state.packet_size != state.link.packet_size
+                                || state.send_interval_us != state.link.send_interval_us
+                            {
+                                state.link.run.store(false, Ordering::SeqCst);
+                                if let Some(thread) = state.link.thread.take() {
+                                    thread.join().ok();
                                 }
-                                Err(_) => {}
+
+                                let (tx, rx) = mpsc::channel();
+
+                                state.rx = rx;
+                                state.link_ok = false;
+                                state.link_data = Vec::new();
+                                state.difference_data = Vec::new();
+                                state.largest_diff = 0.0;
+
+                                let (ip, bind_port, target_port) = match state.link_mode {
+                                    LinkMode::Tx => {
+                                        (state.target_ip.to_str(), 0, state.target_port)
+                                    }
+                                    LinkMode::Rx => (state.bind_ip.to_str(), state.bind_port, 0),
+                                };
+
+                                match IpAddr::from_str(ip) {
+                                    Ok(_) => {
+                                        match Link::new(
+                                            state.link_mode.clone(),
+                                            ip,
+                                            bind_port as u16,
+                                            target_port as u16,
+                                            state.packet_size,
+                                            tx,
+                                            state.send_interval_us,
+                                        ) {
+                                            Ok(link) => {
+                                                state.link = link;
+                                                state.link_ok = true;
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                    Err(_) => {}
+                                }
+                            }
+                        }
+
+                        {
+                            // Show Link stats
+
+                            match state.link_mode {
+                                LinkMode::Tx => {
+                                    let im_string = ImString::new(format!(
+                                        "Sent Packets: {}",
+                                        state.link_data.len()
+                                    ));
+                                    ui.text(&im_string);
+                                }
+                                LinkMode::Rx => {
+                                    let im_string = ImString::new(format!(
+                                        "Received Packets: {}",
+                                        state.link_data.len()
+                                    ));
+                                    ui.text(&im_string);
+                                }
+                            }
+
+                            if ui.small_button(im_str!("Debug pls")) {
+                                state.debug_pls = true;
                             }
                         }
                     });
@@ -382,7 +487,7 @@ fn main() -> Result<()> {
             ));
         let window = winit::window::WindowBuilder::new()
             .with_title("Udp Test")
-            .with_inner_size(LogicalSize::new(720.0, 480.0))
+            .with_inner_size(LogicalSize::new(1280.0, 720.0))
             .with_window_icon(Some(
                 winit::window::Icon::from_rgba(
                     (&*icon_data).to_owned(),
@@ -434,9 +539,17 @@ fn main() -> Result<()> {
             loop {
                 match state.rx.recv_timeout(Duration::from_millis(0)) {
                     Ok(msg) => {
-                        println!("some data pushed: {:?}", &msg);
-
+                        // println!("msg: {:?}", msg);
                         state.link_data.push(msg);
+                        if state.link_data.len() >= 2 {
+                            let last_two: Vec<&LinkPacketData> =
+                                state.link_data.iter().rev().take(2).collect();
+                            let diff = last_two[0].t - last_two[1].t;
+                            state.difference_data.push(diff);
+                            if state.largest_diff < diff {
+                                state.largest_diff = diff;
+                            }
+                        }
                     }
                     Err(_) => {
                         break;

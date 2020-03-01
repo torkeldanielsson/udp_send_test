@@ -27,8 +27,8 @@ pub struct Link {
 
 #[derive(Debug)]
 pub struct LinkPacketData {
-    t: f64,
-    payload_size: i32,
+    pub t: f64,
+    pub payload_size: i32,
 }
 
 impl Link {
