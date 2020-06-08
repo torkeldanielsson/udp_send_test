@@ -78,11 +78,13 @@ fn main() -> std::io::Result<()> {
 
                         next_action_time_ms += 1;
 
-                        buf[0..8].copy_from_slice(&packet_number.to_le_bytes());
+                        for _ in 0..10 {
+                            buf[0..8].copy_from_slice(&packet_number.to_le_bytes());
 
-                        socket.send(&buf)?;
+                            socket.send(&buf)?;
 
-                        packet_number += 1;
+                            packet_number += 1;
+                        }
                     }
                 }
             }
