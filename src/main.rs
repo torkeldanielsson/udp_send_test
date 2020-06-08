@@ -51,6 +51,8 @@ fn main() -> std::io::Result<()> {
                     let mut buf: Vec<u8> = Vec::new();
                     buf.resize(packet_size_bytes, 0);
 
+                    let mut packet_number: u64 = 0;
+
                     loop {
                         if Instant::now().saturating_duration_since(begin)
                             > Duration::from_millis(next_action_time_ms)
@@ -67,7 +69,13 @@ fn main() -> std::io::Result<()> {
 
                         next_action_time_ms += 1;
 
+                        for i in 0..8 {
+                            buf[i] = packet_number.to_le_bytes()[i];
+                        }
+
                         socket.send(&buf)?;
+
+                        packet_number += 1;
                     }
                 }
             }
