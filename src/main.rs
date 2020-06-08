@@ -70,7 +70,7 @@ fn main() -> std::io::Result<()> {
                             );
                         }
 
-                        buf.resize(rng.gen_range(10, 1400), 0);
+                        buf.resize(rng.gen_range(10, 8400), 0);
 
                         while Instant::now().saturating_duration_since(begin)
                             < Duration::from_millis(next_action_time_ms)
@@ -120,9 +120,9 @@ fn main() -> std::io::Result<()> {
                     let mut acc_times = 0;
                     let mut reorders = 0;
                     let mut samples_above_2 = 0;
-                    let mut samples_above_3 = 0;
                     let mut samples_above_4 = 0;
-                    let mut samples_above_5 = 0;
+                    let mut samples_above_8 = 0;
+                    let mut samples_above_16 = 0;
 
                     loop {
                         let (number_of_bytes, _src_addr) = socket.recv_from(&mut buf)?;
@@ -148,14 +148,14 @@ fn main() -> std::io::Result<()> {
                             if time_since_last_rx_s >= 0.002 {
                                 samples_above_2 += 1;
                             }
-                            if time_since_last_rx_s >= 0.003 {
-                                samples_above_3 += 1;
-                            }
                             if time_since_last_rx_s >= 0.004 {
                                 samples_above_4 += 1;
                             }
-                            if time_since_last_rx_s >= 0.005 {
-                                samples_above_5 += 1;
+                            if time_since_last_rx_s >= 0.008 {
+                                samples_above_8 += 1;
+                            }
+                            if time_since_last_rx_s >= 0.016 {
+                                samples_above_16 += 1;
                             }
 
                             acc_times += 1;
@@ -164,13 +164,13 @@ fn main() -> std::io::Result<()> {
                                 let average_ms = average_time_between_rx_s / 10.0;
                                 let max_ms = max_time_between_rx_s * 1000.0;
                                 println!(
-                                    "Stats for last 10'000 samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2: {}, above 3: {}, above 4: {}, above 5: {}, reorders: {}",
+                                    "Stats for last 10'000 samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2 ms: {}, above 4 ms: {}, above 8 ms: {}, above 16 ms: {}, reorders: {}",
                                     average_ms,
                                     max_ms,
                                     samples_above_2,
-                                    samples_above_3,
                                     samples_above_4,
-                                    samples_above_5,
+                                    samples_above_8,
+                                    samples_above_16,
                                     reorders);
 
                                 average_time_between_rx_s = 0.0;
@@ -179,9 +179,9 @@ fn main() -> std::io::Result<()> {
                                 acc_times = 0;
                                 reorders = 0;
                                 samples_above_2 = 0;
-                                samples_above_3 = 0;
                                 samples_above_4 = 0;
-                                samples_above_5 = 0;
+                                samples_above_8 = 0;
+                                samples_above_16 = 0;
                             }
                             last_rx_time = now;
                         }
@@ -195,9 +195,8 @@ fn main() -> std::io::Result<()> {
     }
 
     if print_usage_instructions {
-        println!(
-            "This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.
-To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx ([bind_ip]:)[listen_port]", packet_size_bytes, send_interval_us);
+        println!("This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.", packet_size_bytes, send_interval_us);
+        println!("To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx ([bind_ip]:)[listen_port]");
     }
 
     Ok(())
