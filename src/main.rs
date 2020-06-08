@@ -40,7 +40,8 @@ fn main() -> std::io::Result<()> {
                         &bind_address, &destination_ip, &destination_port
                     );
 
-                    let socket = UdpSocket::bind(bind_address).expect("Couldn't bind to address");
+                    let socket = UdpSocket::bind(format!("{}:0", &bind_address))
+                        .expect("Couldn't bind to address");
                     socket
                         .connect(format!("{}:{}", &destination_ip, &destination_port))
                         .expect("connection failed");
