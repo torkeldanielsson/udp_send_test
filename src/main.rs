@@ -62,8 +62,11 @@ fn main() -> std::io::Result<()> {
                             > Duration::from_millis(next_action_time_ms)
                         {
                             println!(
-                                "Socket send took too much time! ({} > 1000)",
-                                Instant::now().saturating_duration_since(begin).as_micros()
+                                "Socket send took too much time! ({:.02} ms > 1000)",
+                                (Instant::now().saturating_duration_since(begin)
+                                    - Duration::from_millis(next_action_time_ms))
+                                .as_secs_f32()
+                                    * 1000.0
                             );
                         }
 
@@ -141,9 +144,9 @@ fn main() -> std::io::Result<()> {
                             acc_times += 1;
 
                             if acc_times >= 10000 {
-                                average_time_between_rx_s /= 10.0;
-                                max_time_between_rx_s *= 1000.0;
-                                println!("Stats for last 10'000 samples: average time between rx: {} ms, max: {}, reorders: {}", average_time_between_rx_s, max_time_between_rx_s, reorders);
+                                let average_ms = average_time_between_rx_s / 10.0;
+                                let max_ms = max_time_between_rx_s * 1000.0;
+                                println!("Stats for last 10'000 samples, average time between rx: {:.01} ms, max: {:.01} ms, reorders: {}", average_ms, max_ms, reorders);
 
                                 acc_times = 0;
                                 max_time_between_rx_s = 0.0;
