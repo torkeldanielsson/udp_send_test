@@ -15,35 +15,59 @@ fn main() -> std::io::Result<()> {
 
         match mode.as_ref() {
             "tx" => {
-                let destination = &args[2];
+                let parts = &args[2].split(':').collect::<Vec<&str>>();
+                let bind_address;
+                let destination_ip;
+                let destination_port;
+                if parts.len() == 2 {
+                    bind_address = "0.0.0.0";
+                    destination_ip = parts[0];
+                    destination_port = parts[1];
+                } else if parts.len() == 3 {
+                    bind_address = parts[0];
+                    destination_ip = parts[1];
+                    destination_port = parts[2];
+                } else {
+                    bind_address = "";
+                    destination_ip = "";
+                    destination_port = "";
+                    print_usage_instructions = true;
+                }
 
-                println!("sending to {}", destination);
+                if !print_usage_instructions {
+                    println!(
+                        "tx: {}:{}:{}",
+                        &bind_address, &destination_ip, &destination_port
+                    );
 
-                let socket = UdpSocket::bind("0.0.0.0:0").expect("Couldn't bind to address");
-                socket.connect(destination).expect("connection failed");
-                let begin = Instant::now();
-                let mut next_action_time_ms = 1;
+                    let socket = UdpSocket::bind(bind_address).expect("Couldn't bind to address");
+                    socket
+                        .connect(format!("{}:{}", &destination_ip, &destination_port))
+                        .expect("connection failed");
+                    let begin = Instant::now();
+                    let mut next_action_time_ms = 1;
 
-                let mut buf: Vec<u8> = Vec::new();
-                buf.resize(packet_size_bytes, 0);
+                    let mut buf: Vec<u8> = Vec::new();
+                    buf.resize(packet_size_bytes, 0);
 
-                loop {
-                    if Instant::now().saturating_duration_since(begin)
-                        > Duration::from_millis(next_action_time_ms)
-                    {
-                        println!(
-                            "Socket send took too much time! ({} > 1000)",
-                            Instant::now().saturating_duration_since(begin).as_micros()
-                        );
+                    loop {
+                        if Instant::now().saturating_duration_since(begin)
+                            > Duration::from_millis(next_action_time_ms)
+                        {
+                            println!(
+                                "Socket send took too much time! ({} > 1000)",
+                                Instant::now().saturating_duration_since(begin).as_micros()
+                            );
+                        }
+
+                        while Instant::now().saturating_duration_since(begin)
+                            < Duration::from_millis(next_action_time_ms)
+                        {}
+
+                        next_action_time_ms += 1;
+
+                        socket.send(&buf)?;
                     }
-
-                    while Instant::now().saturating_duration_since(begin)
-                        < Duration::from_millis(next_action_time_ms)
-                    {}
-
-                    next_action_time_ms += 1;
-
-                    socket.send(&buf)?;
                 }
             }
             "rx" => {
@@ -83,7 +107,7 @@ fn main() -> std::io::Result<()> {
     if print_usage_instructions {
         println!(
             "This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.
-To use, supply arguments: tx [target_ip:port] or: rx [listen_port]", packet_size_bytes, send_interval_us);
+To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx [listen_port]", packet_size_bytes, send_interval_us);
     }
 
     Ok(())
