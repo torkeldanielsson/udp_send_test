@@ -1,6 +1,7 @@
 use std::env;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
+use std::convert::TryInto;
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -69,9 +70,7 @@ fn main() -> std::io::Result<()> {
 
                         next_action_time_ms += 1;
 
-                        for i in 0..8 {
-                            buf[i] = packet_number.to_le_bytes()[i];
-                        }
+                        buf[0..8].copy_from_slice(&packet_number.to_le_bytes());
 
                         socket.send(&buf)?;
 
@@ -106,17 +105,30 @@ fn main() -> std::io::Result<()> {
 
                     let mut last_rx_time = Instant::now();
                     let begin = Instant::now();
+
+
+                    let mut last_packet_nr: u64 = 0;
+
                     loop {
                         let (number_of_bytes, src_addr) = socket.recv_from(&mut buf)?;
 
+                        if number_of_bytes == packet_size_bytes {
+                            let packet_nr = u64::from_le_bytes(buf[0..8].try_into().unwrap());
+                            
+                            if last_packet_nr + 1 != packet_nr {
+                                println!("reorder detected! ({} != {})",last_packet_nr + 1 , packet_nr);
+                            }
+                            last_packet_nr = packet_nr;
+                        }
+
                         let now = Instant::now();
-                        println!(
-                            "{};{};{};{}",
-                            now.saturating_duration_since(begin).as_nanos(),
-                            now.saturating_duration_since(last_rx_time).as_nanos(),
-                            number_of_bytes,
-                            src_addr
-                        );
+                        //println!(
+                        //    "{};{};{};{}",
+                        //    now.saturating_duration_since(begin).as_nanos(),
+                        //    now.saturating_duration_since(last_rx_time).as_nanos(),
+                        //    number_of_bytes,
+                        //    src_addr
+                        //);
                         last_rx_time = now;
                     }
                 }
