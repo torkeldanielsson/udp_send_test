@@ -119,7 +119,7 @@ fn main() -> std::io::Result<()> {
 
                     let mut average_time_between_rx_s = 0.0;
                     let mut max_time_between_rx_s = 0.0;
-                    let mut acc_times = 0;
+                    let mut acc_count = 0;
                     let mut reorders = 0;
                     let mut samples_above_2 = 0;
                     let mut samples_above_4 = 0;
@@ -160,13 +160,17 @@ fn main() -> std::io::Result<()> {
                                 samples_above_16 += 1;
                             }
 
-                            acc_times += 1;
+                            acc_count += 1;
 
-                            if acc_times >= 10000 {
-                                let average_ms = average_time_between_rx_s / 10.0;
+                            let acc_max = 100_000;
+
+                            if acc_count >= acc_max {
+                                let average_ms =
+                                    1000.0 * (average_time_between_rx_s / (acc_max as f64));
                                 let max_ms = max_time_between_rx_s * 1000.0;
                                 println!(
-                                    "Stats for last 10'000 samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2 ms: {}, above 4 ms: {}, above 8 ms: {}, above 16 ms: {}, reorders: {}",
+                                    "Stats for last {} samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2 ms: {}, above 4 ms: {}, above 8 ms: {}, above 16 ms: {}, reorders: {}",
+                                    acc_max,
                                     average_ms,
                                     max_ms,
                                     samples_above_2,
@@ -176,9 +180,9 @@ fn main() -> std::io::Result<()> {
                                     reorders);
 
                                 average_time_between_rx_s = 0.0;
-                                acc_times = 0;
+                                acc_count = 0;
                                 max_time_between_rx_s = 0.0;
-                                acc_times = 0;
+                                acc_count = 0;
                                 reorders = 0;
                                 samples_above_2 = 0;
                                 samples_above_4 = 0;
