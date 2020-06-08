@@ -167,11 +167,11 @@ fn main() -> std::io::Result<()> {
                                     "Stats for last 10'000 samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2: {}, above 3: {}, above 4: {}, above 5: {}, reorders: {}",
                                     average_ms,
                                     max_ms,
-                                    reorders,
                                     samples_above_2,
                                     samples_above_3,
                                     samples_above_4,
-                                    samples_above_5);
+                                    samples_above_5,
+                                    reorders);
 
                                 average_time_between_rx_s = 0.0;
                                 acc_times = 0;
