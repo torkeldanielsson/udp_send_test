@@ -87,7 +87,7 @@ impl State {
                 link = new_link;
             }
             Err(_) => {
-                link_mode = LinkMode::Tx;
+                link_mode = LinkMode::Rx;
                 link = Link::new(
                     link_mode.clone(),
                     &bind_ip,
