@@ -1,5 +1,5 @@
 use std::env;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
 fn main() -> std::io::Result<()> {
@@ -72,31 +72,45 @@ fn main() -> std::io::Result<()> {
                 }
             }
             "rx" => {
-                let listen_port = args[2]
-                    .parse::<u16>()
-                    .expect("Failed to parse destination port");
+                let parts = &args[2].split(':').collect::<Vec<&str>>();
+                let bind_address;
+                let listen_port;
+                if parts.len() == 1 {
+                    bind_address = "0.0.0.0";
+                    listen_port = parts[0];
+                } else if parts.len() == 2 {
+                    bind_address = parts[0];
+                    listen_port = parts[1];
+                } else {
+                    bind_address = "";
+                    listen_port = "";
+                    print_usage_instructions = true;
+                }
 
-                let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], listen_port)))?;
-                socket
-                    .set_read_timeout(None)
-                    .expect("set_read_timeout call failed");
+                if !print_usage_instructions {
+                    let socket = UdpSocket::bind(format!("{}:{}", &bind_address, &listen_port))
+                        .expect("Couldn't bind to address");
+                    socket
+                        .set_read_timeout(None)
+                        .expect("set_read_timeout call failed");
 
-                let mut buf = [0; 9000];
+                    let mut buf = [0; 9000];
 
-                let mut last_rx_time = Instant::now();
-                let begin = Instant::now();
-                loop {
-                    let (number_of_bytes, src_addr) = socket.recv_from(&mut buf)?;
+                    let mut last_rx_time = Instant::now();
+                    let begin = Instant::now();
+                    loop {
+                        let (number_of_bytes, src_addr) = socket.recv_from(&mut buf)?;
 
-                    let now = Instant::now();
-                    println!(
-                        "{};{};{};{}",
-                        now.saturating_duration_since(begin).as_nanos(),
-                        now.saturating_duration_since(last_rx_time).as_nanos(),
-                        number_of_bytes,
-                        src_addr
-                    );
-                    last_rx_time = now;
+                        let now = Instant::now();
+                        println!(
+                            "{};{};{};{}",
+                            now.saturating_duration_since(begin).as_nanos(),
+                            now.saturating_duration_since(last_rx_time).as_nanos(),
+                            number_of_bytes,
+                            src_addr
+                        );
+                        last_rx_time = now;
+                    }
                 }
             }
             &_ => {
@@ -108,7 +122,7 @@ fn main() -> std::io::Result<()> {
     if print_usage_instructions {
         println!(
             "This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.
-To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx [listen_port]", packet_size_bytes, send_interval_us);
+To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx ([bind_ip]:)[listen_port]", packet_size_bytes, send_interval_us);
     }
 
     Ok(())
