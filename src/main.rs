@@ -145,16 +145,16 @@ fn main() -> std::io::Result<()> {
                                 max_time_between_rx_s = time_since_last_rx_s;
                             }
 
-                            if time_since_last_rx_s >= 2.0 {
+                            if time_since_last_rx_s >= 0.002 {
                                 samples_above_2 += 1;
                             }
-                            if time_since_last_rx_s >= 3.0 {
+                            if time_since_last_rx_s >= 0.003 {
                                 samples_above_3 += 1;
                             }
-                            if time_since_last_rx_s >= 4.0 {
+                            if time_since_last_rx_s >= 0.004 {
                                 samples_above_4 += 1;
                             }
-                            if time_since_last_rx_s >= 5.0 {
+                            if time_since_last_rx_s >= 0.005 {
                                 samples_above_5 += 1;
                             }
 
