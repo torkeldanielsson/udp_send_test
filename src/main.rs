@@ -1,11 +1,12 @@
 use std::convert::TryInto;
 use std::env;
-use std::net::UdpSocket;
 use std::time::{Duration, Instant};
+use tokio::net::UdpSocket;
 
 use rand::Rng;
 
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     let mut rng = rand::thread_rng();
 
     let args: Vec<String> = env::args().collect();
@@ -45,10 +46,12 @@ fn main() -> std::io::Result<()> {
                         &bind_address, &destination_ip, &destination_port
                     );
 
-                    let socket = UdpSocket::bind(format!("{}:0", &bind_address))
+                    let mut socket = UdpSocket::bind(format!("{}:0", &bind_address))
+                        .await
                         .expect("Couldn't bind to address");
                     socket
                         .connect(format!("{}:{}", &destination_ip, &destination_port))
+                        .await
                         .expect("connection failed");
                     let begin = Instant::now();
                     let mut next_action_time_ms = 1;
@@ -81,7 +84,7 @@ fn main() -> std::io::Result<()> {
                         for _ in 0..10 {
                             buf[0..8].copy_from_slice(&packet_number.to_le_bytes());
 
-                            socket.send(&buf)?;
+                            socket.send(&buf).await?;
 
                             packet_number += 1;
                         }
@@ -105,11 +108,9 @@ fn main() -> std::io::Result<()> {
                 }
 
                 if !print_usage_instructions {
-                    let socket = UdpSocket::bind(format!("{}:{}", &bind_address, &listen_port))
+                    let mut socket = UdpSocket::bind(format!("{}:{}", &bind_address, &listen_port))
+                        .await
                         .expect("Couldn't bind to address");
-                    socket
-                        .set_read_timeout(None)
-                        .expect("set_read_timeout call failed");
 
                     let mut buf = [0; 9000];
 
@@ -127,7 +128,7 @@ fn main() -> std::io::Result<()> {
                     let mut samples_above_16 = 0;
 
                     loop {
-                        let (number_of_bytes, _src_addr) = socket.recv_from(&mut buf)?;
+                        let (number_of_bytes, _src_addr) = socket.recv_from(&mut buf).await?;
 
                         if number_of_bytes > 8 {
                             let packet_nr = u64::from_le_bytes(buf[0..8].try_into().unwrap());
