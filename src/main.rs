@@ -201,10 +201,13 @@ async fn main() -> std::io::Result<()> {
                                             }
                                         }
                                     }
+
+                                    println!("Unexpected end of packet stream");
+                                    return Ok(());
                                 }
                             }
                         }
-                        Err(e) => println!("error listing network devices: {:?}", e),
+                        Err(e) => println!("Error listing network devices: {:?}", e),
                     }
 
                     println!("No device found matching device id: {}", device_id);
