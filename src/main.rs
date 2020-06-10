@@ -15,6 +15,7 @@ async fn main() -> std::io::Result<()> {
 
     let send_interval_us = 1000;
     let packet_size_bytes = 500;
+    let packet_burst_count = 10;
 
     if !print_usage_instructions {
         let mode: &str = &args[1];
@@ -81,7 +82,7 @@ async fn main() -> std::io::Result<()> {
 
                         next_action_time_ms += 1;
 
-                        for _ in 0..10 {
+                        for _ in 0..packet_burst_count {
                             buf[0..8].copy_from_slice(&packet_number.to_le_bytes());
 
                             socket.send(&buf).await?;
@@ -181,7 +182,6 @@ async fn main() -> std::io::Result<()> {
                                     reorders);
 
                                 average_time_between_rx_s = 0.0;
-                                acc_count = 0;
                                 max_time_between_rx_s = 0.0;
                                 acc_count = 0;
                                 reorders = 0;
@@ -204,6 +204,15 @@ async fn main() -> std::io::Result<()> {
     if print_usage_instructions {
         println!("This program will either send a {} b udp packet every {} μs or listen for packets and print the time diff.", packet_size_bytes, send_interval_us);
         println!("To use, supply arguments: tx ([bind_ip]:)[target_ip]:[port] or: rx ([bind_ip]:)[listen_port]");
+    }
+
+    match pcap::Device::list() {
+        Ok(devices) => {
+            for device in devices {
+                println!("{}, {:?}", device.name, device.desc);
+            }
+            },
+        Err(e) => println!("error listing devices: {:?}", e),
     }
 
     Ok(())
