@@ -128,55 +128,56 @@ async fn main() -> std::io::Result<()> {
                                     let mut samples_above_16 = 0;
 
                                     while let Ok(packet) = cap.next() {
-                                        let data: &[u8] = &packet.data[42..];
+                                        if packet.data.len() > 58 {
+                                            let data: &[u8] = &packet.data[42..];
 
-                                        let rx_magic =
-                                            u64::from_le_bytes(data[0..8].try_into().unwrap());
-                                        let packet_nr =
-                                            u64::from_le_bytes(data[8..16].try_into().unwrap());
+                                            let rx_magic =
+                                                u64::from_le_bytes(data[0..8].try_into().unwrap());
+                                            let packet_nr =
+                                                u64::from_le_bytes(data[8..16].try_into().unwrap());
 
-                                        if rx_magic == magic {
-                                            if last_packet_nr != 0
-                                                && last_packet_nr + 1 != packet_nr
-                                            {
-                                                reorders += 1;
-                                            }
-                                            last_packet_nr = packet_nr;
+                                            if rx_magic == magic {
+                                                if last_packet_nr != 0
+                                                    && last_packet_nr + 1 != packet_nr
+                                                {
+                                                    reorders += 1;
+                                                }
+                                                last_packet_nr = packet_nr;
 
-                                            let now = Instant::now();
+                                                let now = Instant::now();
 
-                                            let time_since_last_rx_s = now
-                                                .saturating_duration_since(last_rx_time)
-                                                .as_secs_f64();
+                                                let time_since_last_rx_s = now
+                                                    .saturating_duration_since(last_rx_time)
+                                                    .as_secs_f64();
 
-                                            average_time_between_rx_s += time_since_last_rx_s;
-                                            if max_time_between_rx_s < time_since_last_rx_s {
-                                                max_time_between_rx_s = time_since_last_rx_s;
-                                            }
+                                                average_time_between_rx_s += time_since_last_rx_s;
+                                                if max_time_between_rx_s < time_since_last_rx_s {
+                                                    max_time_between_rx_s = time_since_last_rx_s;
+                                                }
 
-                                            if time_since_last_rx_s >= 0.002 {
-                                                samples_above_2 += 1;
-                                            }
-                                            if time_since_last_rx_s >= 0.004 {
-                                                samples_above_4 += 1;
-                                            }
-                                            if time_since_last_rx_s >= 0.008 {
-                                                samples_above_8 += 1;
-                                            }
-                                            if time_since_last_rx_s >= 0.016 {
-                                                samples_above_16 += 1;
-                                            }
+                                                if time_since_last_rx_s >= 0.002 {
+                                                    samples_above_2 += 1;
+                                                }
+                                                if time_since_last_rx_s >= 0.004 {
+                                                    samples_above_4 += 1;
+                                                }
+                                                if time_since_last_rx_s >= 0.008 {
+                                                    samples_above_8 += 1;
+                                                }
+                                                if time_since_last_rx_s >= 0.016 {
+                                                    samples_above_16 += 1;
+                                                }
 
-                                            acc_count += 1;
+                                                acc_count += 1;
 
-                                            let acc_max = 100_000;
+                                                let acc_max = 100_000;
 
-                                            if acc_count >= acc_max {
-                                                let average_ms = 1000.0
-                                                    * (average_time_between_rx_s
-                                                        / (acc_max as f64));
-                                                let max_ms = max_time_between_rx_s * 1000.0;
-                                                println!(
+                                                if acc_count >= acc_max {
+                                                    let average_ms = 1000.0
+                                                        * (average_time_between_rx_s
+                                                            / (acc_max as f64));
+                                                    let max_ms = max_time_between_rx_s * 1000.0;
+                                                    println!(
                                                     "Stats for last {} samples, average time between rx: {:.01} ms, max: {:.01} ms, above 2 ms: {}, above 4 ms: {}, above 8 ms: {}, above 16 ms: {}, reorders: {}",
                                                     acc_max,
                                                     average_ms,
@@ -187,16 +188,17 @@ async fn main() -> std::io::Result<()> {
                                                     samples_above_16,
                                                     reorders);
 
-                                                average_time_between_rx_s = 0.0;
-                                                max_time_between_rx_s = 0.0;
-                                                acc_count = 0;
-                                                reorders = 0;
-                                                samples_above_2 = 0;
-                                                samples_above_4 = 0;
-                                                samples_above_8 = 0;
-                                                samples_above_16 = 0;
+                                                    average_time_between_rx_s = 0.0;
+                                                    max_time_between_rx_s = 0.0;
+                                                    acc_count = 0;
+                                                    reorders = 0;
+                                                    samples_above_2 = 0;
+                                                    samples_above_4 = 0;
+                                                    samples_above_8 = 0;
+                                                    samples_above_16 = 0;
+                                                }
+                                                last_rx_time = now;
                                             }
-                                            last_rx_time = now;
                                         }
                                     }
                                 }
