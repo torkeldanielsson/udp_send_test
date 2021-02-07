@@ -10,9 +10,10 @@ use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
 use std::{path::Path, sync::mpsc};
 
-mod link;
-
-use link::{Link, LinkMode, LinkPacketData};
+mod rx;
+use rx::Rx;
+mod tx;
+use tx::Tx;
 
 struct System {
     pub event_loop: EventLoop<()>,
@@ -142,11 +143,10 @@ fn init(title: &str) -> System {
 fn main() {
     let system = init("UDP Test");
 
-    let target_port = 5005;
+    let target_port = 27000;
     let target_ip = "127.0.0.1";
     let bind_port = target_port;
     let bind_ip = "0.0.0.0";
-    let mut link_mode = LinkMode::Rx;
     let packet_size = 500;
     let send_interval_us = 1000;
     let mut im_string_target_ip = ImString::new(target_ip);
@@ -155,39 +155,7 @@ fn main() {
     let mut im_string_bind_ip = ImString::new(bind_ip);
     im_string_bind_ip.reserve(128);
 
-    //let (tx, rx) = mpsc::channel();
-
-    let mut tx_link: Option<Link> = Option::None;
-    let mut rx_link: Option<Link> = Option::None;
-    /*
-    match Link::new(
-        LinkMode::Tx,
-        &bind_ip,
-        bind_port as u16,
-        &target_ip,
-        target_port as u16,
-        packet_size,
-        tx.clone(),
-        send_interval_us,
-    ) {
-        Ok(new_link) => {
-            link = new_link;
-        }
-        Err(_) => {
-            link_mode = LinkMode::Rx;
-            link = Link::new(
-                link_mode.clone(),
-                &bind_ip,
-                0,
-                &target_ip,
-                target_port as u16,
-                packet_size,
-                tx,
-                send_interval_us,
-            )
-            .expect("Failed to create send link too");
-        }
-    }*/
+    let mut rx = Rx::new(bind_ip, bind_port);
 
     system.main_loop(move |_, ui| {
         let view_size = ui.io().display_size;
@@ -233,6 +201,7 @@ fn main() {
             .build(ui, || {
                 ui.text(im_str!("UDP Test: Tx"));
                 ui.separator();
+                //ui.checkbox(im_str!("Active"), value);
             });
 
         let rx_window_width = if view_size[0] > 401.0 {
