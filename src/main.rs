@@ -8,7 +8,7 @@ use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
 use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
-use std::{path::Path, sync::mpsc};
+use std::{path::Path, sync::Arc};
 
 mod rx;
 use rx::Rx;
@@ -143,19 +143,33 @@ fn init(title: &str) -> System {
 fn main() {
     let system = init("UDP Test");
 
-    let target_port = 27000;
-    let target_ip = "127.0.0.1";
-    let bind_port = target_port;
-    let bind_ip = "0.0.0.0";
-    let packet_size = 500;
-    let send_interval_us = 1000;
-    let mut im_string_target_ip = ImString::new(target_ip);
-    im_string_target_ip.reserve(128);
-
-    let mut im_string_bind_ip = ImString::new(bind_ip);
+    let mut im_string_bind_ip = ImString::new("0.0.0.0");
     im_string_bind_ip.reserve(128);
 
-    let mut rx = Rx::new(bind_ip, bind_port);
+    let mut rx_bind_port = 27000;
+
+    //let mut rx = Rx::new(im_string_bind_ip.as_ref(), rx_bind_port);
+
+    let mut tx_target_port = 27000;
+    let mut tx_packet_size = 500;
+    let mut tx_send_interval_us = 1000;
+
+    let mut im_string_target_ip = ImString::new("127.0.0.1");
+    im_string_target_ip.reserve(128);
+
+    let mut im_string_bind_ip = ImString::new("0.0.0.0");
+    im_string_bind_ip.reserve(128);
+
+    let mut tx: Arc<Option<Tx>> = Arc::new(
+        Tx::new(
+            im_string_bind_ip.as_ref(),
+            im_string_target_ip.as_ref(),
+            tx_target_port,
+            tx_packet_size,
+            tx_send_interval_us,
+        )
+        .ok(),
+    );
 
     system.main_loop(move |_, ui| {
         let view_size = ui.io().display_size;
@@ -201,7 +215,40 @@ fn main() {
             .build(ui, || {
                 ui.text(im_str!("UDP Test: Tx"));
                 ui.separator();
-                //ui.checkbox(im_str!("Active"), value);
+
+                let mut stop = false;
+                let mut start = false;
+
+                match tx.as_ref() {
+                    Some(tx) => {
+                        if ui.small_button(im_str!("Stop")) {
+                            stop = true;
+                        }
+                        ui.text(format!("Sent packets: {}", tx.get_send_count()));
+                    }
+                    None => {
+                        if ui.small_button(im_str!("Start")) {
+                            start = true;
+                        }
+                    }
+                }
+
+                if stop {
+                    tx = Arc::new(None);
+                }
+
+                if start {
+                    tx = Arc::new(
+                        Tx::new(
+                            im_string_bind_ip.as_ref(),
+                            im_string_target_ip.as_ref(),
+                            tx_target_port,
+                            tx_packet_size,
+                            tx_send_interval_us,
+                        )
+                        .ok(),
+                    );
+                }
             });
 
         let rx_window_width = if view_size[0] > 401.0 {

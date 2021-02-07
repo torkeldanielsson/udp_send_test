@@ -1,16 +1,16 @@
 use anyhow::Result;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{str::FromStr, sync::atomic::AtomicUsize};
 
 #[derive(Debug)]
 pub struct Tx {
     run: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    send_count: Arc<AtomicUsize>,
 }
 
 impl Tx {
@@ -36,6 +36,9 @@ impl Tx {
         let mut payload: Vec<u8> = Vec::with_capacity(9048);
         payload.resize_with(packet_size as usize, Default::default);
 
+        let send_count = Arc::new(AtomicUsize::new(0));
+        let send_count_thread = send_count.clone();
+
         let thread = thread::spawn(move || {
             let begin = Instant::now();
 
@@ -55,12 +58,19 @@ impl Tx {
                 next_tx_time_us += send_interval_us;
 
                 sock.send_to(&payload, target_addr).ok();
+
+                send_count_thread.fetch_add(1, Ordering::SeqCst);
             }
         });
 
         Ok(Tx {
             run: run,
             thread: Some(thread),
+            send_count: send_count,
         })
+    }
+
+    pub fn get_send_count(&self) -> u64 {
+        self.send_count.load(Ordering::SeqCst) as u64
     }
 }
