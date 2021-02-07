@@ -256,7 +256,7 @@ fn main() {
                         Drag::new(im_str!("Packet Size"))
                             .range(64..=1400)
                             .build(ui, &mut tx_packet_size);
-                        Drag::new(im_str!("Send Interval (time between packets)"))
+                        Drag::new(im_str!("Send Interval"))
                             .range(500..=1000000)
                             .display_format(im_str!("%d µs"))
                             .build(ui, &mut tx_send_interval_us);
@@ -315,12 +315,16 @@ fn main() {
                         ));
                         ui.text(format!("Listen Port: {}", rx_listen_port));
 
-                        Drag::new(im_str!("Stat Length"))
+                        ui.spacing();
+
+                        Drag::new(im_str!("Statistics Window Length"))
                             .range(1..=1000000)
+                            .display_format(im_str!("%d samples"))
                             .build(ui, &mut stat_length);
 
                         {
                             let t_diff_data = rx.get_t_diff_data();
+                            let t_rx_data = rx.get_t_rx_data();
 
                             let start_sample = if (stat_length as usize) < t_diff_data.len() {
                                 t_diff_data.len() - stat_length as usize
@@ -331,7 +335,34 @@ fn main() {
                             let t_diff_data = &t_diff_data[start_sample..];
 
                             ui.plot_lines(im_str!("Delta Times"), t_diff_data).build();
+
+                            {
+                                let mut average = 0.0;
+                                let mut min = std::f32::MAX;
+                                let mut max = std::f32::MIN;
+
+                                for v in t_diff_data {
+                                    average += v;
+                                    if v < &min {
+                                        min = *v;
+                                    }
+                                    if v > &max {
+                                        max = *v;
+                                    }
+                                }
+
+                                average = average / t_diff_data.len() as f32;
+
+                                ui.text(format!(
+                                    "Min: {:.02}, Max: {:.02}, Average: {:.02} (ms)",
+                                    1000.0 * min,
+                                    1000.0 * max,
+                                    1000.0 * average
+                                ));
+                            }
                         }
+
+                        ui.spacing();
                     }
                     None => {
                         if ui.small_button(im_str!("Start")) {

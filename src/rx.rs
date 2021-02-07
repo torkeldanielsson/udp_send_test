@@ -91,4 +91,11 @@ impl Rx {
         }
         return Vec::new();
     }
+
+    pub fn get_t_rx_data(&self) -> Vec<f64> {
+        if let Some(t_rx_data) = self.t_rx_data.lock().ok() {
+            return t_rx_data.clone();
+        }
+        return Vec::new();
+    }
 }
