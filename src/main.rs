@@ -1,3 +1,4 @@
+use core::cmp;
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
 use glium::glutin::event_loop::{ControlFlow, EventLoop};
@@ -172,7 +173,7 @@ fn main() {
         .ok(),
     );
 
-    let mut stat_length: i32 = 1000;
+    let mut stat_length_s: f32 = 10.0;
 
     system.main_loop(move |_, ui| {
         let view_size = ui.io().display_size;
@@ -315,50 +316,91 @@ fn main() {
                         ));
                         ui.text(format!("Listen Port: {}", rx_listen_port));
 
-                        ui.spacing();
-
                         Drag::new(im_str!("Statistics Window Length"))
-                            .range(1..=1000000)
-                            .display_format(im_str!("%d samples"))
-                            .build(ui, &mut stat_length);
+                            .range(0.1..=1000.0)
+                            .display_format(im_str!("%.02f s"))
+                            .speed(0.01)
+                            .build(ui, &mut stat_length_s);
 
                         {
                             let t_diff_data = rx.get_t_diff_data();
                             let t_rx_data = rx.get_t_rx_data();
 
-                            let start_sample = if (stat_length as usize) < t_diff_data.len() {
-                                t_diff_data.len() - stat_length as usize
-                            } else {
-                                0
-                            };
+                            if t_diff_data.len() > 2 && t_rx_data.len() > 2 {
+                                let last_time = t_rx_data.last().unwrap();
+                                let start_window_time = last_time - stat_length_s as f64;
 
-                            let t_diff_data = &t_diff_data[start_sample..];
-
-                            ui.plot_lines(im_str!("Delta Times"), t_diff_data).build();
-
-                            {
-                                let mut average = 0.0;
-                                let mut min = std::f32::MAX;
-                                let mut max = std::f32::MIN;
-
-                                for v in t_diff_data {
-                                    average += v;
-                                    if v < &min {
-                                        min = *v;
-                                    }
-                                    if v > &max {
-                                        max = *v;
-                                    }
+                                let mut first_sample = t_rx_data.len() - 2;
+                                while first_sample != 0
+                                    && t_rx_data[first_sample] > start_window_time
+                                {
+                                    first_sample -= 1;
                                 }
 
-                                average = average / t_diff_data.len() as f32;
+                                let start_window_time = t_rx_data[first_sample];
+                                let end_window_time = t_rx_data.last().unwrap();
+                                let window_time = end_window_time - start_window_time;
 
+                                let sample_count = t_rx_data.len() - first_sample as usize;
                                 ui.text(format!(
-                                    "Min: {:.02}, Max: {:.02}, Average: {:.02} (ms)",
-                                    1000.0 * min,
-                                    1000.0 * max,
-                                    1000.0 * average
+                                    "Rx packets in statistics range: {}",
+                                    sample_count as i64
                                 ));
+
+                                let t_rx_data = &t_rx_data[first_sample..];
+                                let t_diff_data = &t_diff_data[first_sample..];
+
+                                ui.plot_lines(im_str!("Delta Times"), t_diff_data)
+                                    .scale_min(0.0)
+                                    .build();
+
+                                {
+                                    let mut average = 0.0;
+                                    let mut min = std::f32::MAX;
+                                    let mut max = std::f32::MIN;
+
+                                    for v in t_diff_data {
+                                        average += v;
+                                        if v < &min {
+                                            min = *v;
+                                        }
+                                        if v > &max {
+                                            max = *v;
+                                        }
+                                    }
+
+                                    average = average / t_diff_data.len() as f32;
+
+                                    ui.text(format!(
+                                        "Min: {:.02}, Max: {:.02}, Average: {:.02} (ms)",
+                                        1000.0 * min,
+                                        1000.0 * max,
+                                        1000.0 * average
+                                    ));
+                                }
+
+                                let time_samples = cmp::min(100, sample_count / 10);
+                                let time_samples_dt = window_time / time_samples as f64;
+                                let mut sample_start_i: usize = 0;
+                                let mut sample_end_i: usize = 0;
+                                let mut time_sample_time_i = start_window_time;
+                                let mut time_samples_data = Vec::new();
+                                for _ in 0..time_samples {
+                                    sample_start_i = sample_end_i;
+                                    time_sample_time_i += time_samples_dt;
+                                    while sample_end_i < sample_count
+                                        && t_rx_data[sample_end_i] < time_sample_time_i
+                                    {
+                                        sample_end_i += 1;
+                                    }
+                                    time_samples_data.push((sample_end_i - sample_start_i) as f32);
+                                }
+                                ui.plot_lines(
+                                    im_str!("Packets Per Time"),
+                                    time_samples_data.as_slice(),
+                                )
+                                .scale_min(0.0)
+                                .build();
                             }
                         }
 
