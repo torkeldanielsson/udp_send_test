@@ -1,15 +1,27 @@
 use anyhow::Result;
-use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    net::{IpAddr, SocketAddr, UdpSocket},
+    sync::Mutex,
+};
 
 #[derive(Debug)]
 pub struct Rx {
     run: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    join_handle: Option<JoinHandle<()>>,
+    t_rx_data: Arc<Mutex<Vec<f64>>>,
+    t_diff_data: Arc<Mutex<Vec<f32>>>,
+}
+
+impl Drop for Rx {
+    fn drop(&mut self) {
+        self.run.store(false, Ordering::SeqCst);
+        self.join_handle.take().unwrap().join().ok();
+    }
 }
 
 impl Rx {
@@ -23,23 +35,42 @@ impl Rx {
         sock.set_read_timeout(Some(Duration::from_millis(100)))?;
 
         let mut rx_buffer: Vec<u8> = Vec::with_capacity(9048);
+        rx_buffer.resize(9048, 0);
 
-        let thread = thread::spawn(move || {
+        let mut last_rx_time = UNIX_EPOCH;
+
+        let t_rx_data: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+        let t_rx_data_local = t_rx_data.clone();
+
+        let t_diff_data: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+        let t_diff_data_local = t_diff_data.clone();
+
+        let join_handle = thread::spawn(move || {
             while run_thread.load(Ordering::SeqCst) {
                 match sock.recv_from(rx_buffer.as_mut_slice()) {
-                    Ok((received, _from)) => {
+                    Ok((_received, _from)) => {
                         let rx_time = SystemTime::now();
                         let since_the_epoch = rx_time
                             .duration_since(UNIX_EPOCH)
                             .expect("error converting time");
-                        /*tx.send(LinkPacketData {
-                            t: since_the_epoch.as_secs_f64(),
-                            payload_size: received as i32,
-                        })
-                        .expect("error sending data on channel");*/
+                        let since_last = rx_time
+                            .duration_since(last_rx_time)
+                            .expect("error converting time");
+
+                        if let Some(mut t_rx_data) = t_rx_data_local.lock().ok() {
+                            t_rx_data.push(since_the_epoch.as_secs_f64());
+                        }
+
+                        if last_rx_time > UNIX_EPOCH {
+                            if let Some(mut t_diff_data) = t_diff_data_local.lock().ok() {
+                                t_diff_data.push(since_last.as_secs_f32());
+                            }
+                        }
+
+                        last_rx_time = rx_time;
                     }
                     Err(ref e) if e.kind() != std::io::ErrorKind::TimedOut => {
-                        println!("sock recv_from failed: {:?}", e)
+                        println!("sock recv_from failed: {:?}, len: {}", e, rx_buffer.len())
                     }
                     Err(_) => (),
                 }
@@ -48,7 +79,16 @@ impl Rx {
 
         Ok(Rx {
             run: run,
-            thread: Some(thread),
+            join_handle: Some(join_handle),
+            t_rx_data,
+            t_diff_data,
         })
+    }
+
+    pub fn get_t_diff_data(&self) -> Vec<f32> {
+        if let Some(t_diff_data) = self.t_diff_data.lock().ok() {
+            return t_diff_data.clone();
+        }
+        return Vec::new();
     }
 }

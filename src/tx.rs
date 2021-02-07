@@ -3,14 +3,21 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use std::{str::FromStr, sync::atomic::AtomicUsize};
 
 #[derive(Debug)]
 pub struct Tx {
     run: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    join_handle: Option<JoinHandle<()>>,
     send_count: Arc<AtomicUsize>,
+}
+
+impl Drop for Tx {
+    fn drop(&mut self) {
+        self.run.store(false, Ordering::SeqCst);
+        self.join_handle.take().unwrap().join().ok();
+    }
 }
 
 impl Tx {
@@ -39,7 +46,7 @@ impl Tx {
         let send_count = Arc::new(AtomicUsize::new(0));
         let send_count_thread = send_count.clone();
 
-        let thread = thread::spawn(move || {
+        let join_handle = thread::spawn(move || {
             let begin = Instant::now();
 
             let mut next_tx_time_us = send_interval_us;
@@ -49,11 +56,6 @@ impl Tx {
                     < Duration::from_micros(next_tx_time_us as u64)
                     && run_thread.load(Ordering::SeqCst)
                 {}
-
-                let tx_time = SystemTime::now();
-                let since_the_epoch = tx_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("error converting time");
 
                 next_tx_time_us += send_interval_us;
 
@@ -65,7 +67,7 @@ impl Tx {
 
         Ok(Tx {
             run: run,
-            thread: Some(thread),
+            join_handle: Some(join_handle),
             send_count: send_count,
         })
     }

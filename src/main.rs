@@ -143,33 +143,36 @@ fn init(title: &str) -> System {
 fn main() {
     let system = init("Voysys UDP Test");
 
-    let mut im_string_bind_ip = ImString::new("0.0.0.0");
-    im_string_bind_ip.reserve(128);
+    let mut rx_im_string_bind_ip = ImString::new("0.0.0.0");
+    rx_im_string_bind_ip.reserve(128);
 
-    let mut rx_bind_port = 27000;
+    let mut rx_listen_port = 27000;
 
-    //let mut rx = Rx::new(im_string_bind_ip.as_ref(), rx_bind_port);
+    let mut rx: Arc<Option<Rx>> =
+        Arc::new(Rx::new(rx_im_string_bind_ip.as_ref(), rx_listen_port).ok());
 
     let mut tx_target_port = 27000;
     let mut tx_packet_size = 500;
-    let mut tx_send_interval_us = 1000;
+    let mut tx_send_interval_us = 10000;
 
-    let mut im_string_target_ip = ImString::new("127.0.0.1");
-    im_string_target_ip.reserve(128);
+    let mut tx_im_string_target_ip = ImString::new("127.0.0.1");
+    tx_im_string_target_ip.reserve(128);
 
-    let mut im_string_bind_ip = ImString::new("0.0.0.0");
-    im_string_bind_ip.reserve(128);
+    let mut tx_im_string_bind_ip = ImString::new("0.0.0.0");
+    tx_im_string_bind_ip.reserve(128);
 
     let mut tx: Arc<Option<Tx>> = Arc::new(
         Tx::new(
-            im_string_bind_ip.as_ref(),
-            im_string_target_ip.as_ref(),
+            tx_im_string_bind_ip.as_ref(),
+            tx_im_string_target_ip.as_ref(),
             tx_target_port,
             tx_packet_size,
             tx_send_interval_us,
         )
         .ok(),
     );
+
+    let mut stat_length: i32 = 1000;
 
     system.main_loop(move |_, ui| {
         let view_size = ui.io().display_size;
@@ -225,10 +228,13 @@ fn main() {
                             stop = true;
                         }
 
-                        ui.text(format!("Bind IP: {}", im_string_bind_ip.as_ref() as &str));
+                        ui.text(format!(
+                            "Bind IP: {}",
+                            tx_im_string_bind_ip.as_ref() as &str
+                        ));
                         ui.text(format!(
                             "Destination IP: {}",
-                            im_string_target_ip.as_ref() as &str
+                            tx_im_string_target_ip.as_ref() as &str
                         ));
                         ui.text(format!("Destination Port: {}", tx_target_port));
                         ui.text(format!("Packet Size: {}", tx_packet_size));
@@ -240,9 +246,9 @@ fn main() {
                         if ui.small_button(im_str!("Start")) {
                             start = true;
                         }
-                        ui.input_text(im_str!("Bind IP"), &mut im_string_bind_ip)
+                        ui.input_text(im_str!("Bind IP"), &mut tx_im_string_bind_ip)
                             .build();
-                        ui.input_text(im_str!("Destination IP"), &mut im_string_target_ip)
+                        ui.input_text(im_str!("Destination IP"), &mut tx_im_string_target_ip)
                             .build();
                         Drag::new(im_str!("Destination Port"))
                             .range(1..=65236)
@@ -264,8 +270,8 @@ fn main() {
                 if start {
                     tx = Arc::new(
                         Tx::new(
-                            im_string_bind_ip.as_ref(),
-                            im_string_target_ip.as_ref(),
+                            tx_im_string_bind_ip.as_ref(),
+                            tx_im_string_target_ip.as_ref(),
                             tx_target_port,
                             tx_packet_size,
                             tx_send_interval_us,
@@ -293,6 +299,62 @@ fn main() {
             .build(ui, || {
                 ui.text(im_str!("UDP Test: Rx"));
                 ui.separator();
+
+                let mut stop = false;
+                let mut start = false;
+
+                match rx.as_ref() {
+                    Some(rx) => {
+                        if ui.small_button(im_str!("Stop")) {
+                            stop = true;
+                        }
+
+                        ui.text(format!(
+                            "Bind IP: {}",
+                            rx_im_string_bind_ip.as_ref() as &str
+                        ));
+                        ui.text(format!("Listen Port: {}", rx_listen_port));
+
+                        Drag::new(im_str!("Stat Length"))
+                            .range(1..=1000000)
+                            .build(ui, &mut stat_length);
+
+                        {
+                            let t_diff_data = rx.get_t_diff_data();
+
+                            let start_sample = if (stat_length as usize) < t_diff_data.len() {
+                                t_diff_data.len() - stat_length as usize
+                            } else {
+                                0
+                            };
+
+                            let t_diff_data = &t_diff_data[start_sample..];
+
+                            ui.plot_lines(im_str!("Delta Times"), t_diff_data).build();
+                        }
+                    }
+                    None => {
+                        if ui.small_button(im_str!("Start")) {
+                            start = true;
+                        }
+                        ui.input_text(im_str!("Bind IP"), &mut rx_im_string_bind_ip)
+                            .build();
+                        Drag::new(im_str!("Listen Port"))
+                            .range(1..=65236)
+                            .build(ui, &mut rx_listen_port);
+                    }
+                }
+
+                if stop {
+                    rx = Arc::new(None);
+                }
+
+                if start {
+                    rx = Arc::new(Rx::new(tx_im_string_bind_ip.as_ref(), rx_listen_port).ok());
+                    if !rx.is_some() {
+                        println!("Failed to open");
+                    }
+                }
             });
 
         style_colors.pop(&ui);
