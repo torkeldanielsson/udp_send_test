@@ -141,7 +141,7 @@ fn init(title: &str) -> System {
 }
 
 fn main() {
-    let system = init("UDP Test");
+    let system = init("Voysys UDP Test");
 
     let mut im_string_bind_ip = ImString::new("0.0.0.0");
     im_string_bind_ip.reserve(128);
@@ -224,12 +224,36 @@ fn main() {
                         if ui.small_button(im_str!("Stop")) {
                             stop = true;
                         }
+
+                        ui.text(format!("Bind IP: {}", im_string_bind_ip.as_ref() as &str));
+                        ui.text(format!(
+                            "Destination IP: {}",
+                            im_string_target_ip.as_ref() as &str
+                        ));
+                        ui.text(format!("Destination Port: {}", tx_target_port));
+                        ui.text(format!("Packet Size: {}", tx_packet_size));
+                        ui.text(format!("Send Interval: {} µs", tx_send_interval_us));
+
                         ui.text(format!("Sent packets: {}", tx.get_send_count()));
                     }
                     None => {
                         if ui.small_button(im_str!("Start")) {
                             start = true;
                         }
+                        ui.input_text(im_str!("Bind IP"), &mut im_string_bind_ip)
+                            .build();
+                        ui.input_text(im_str!("Destination IP"), &mut im_string_target_ip)
+                            .build();
+                        Drag::new(im_str!("Destination Port"))
+                            .range(1..=65236)
+                            .build(ui, &mut tx_target_port);
+                        Drag::new(im_str!("Packet Size"))
+                            .range(64..=1400)
+                            .build(ui, &mut tx_packet_size);
+                        Drag::new(im_str!("Send Interval (time between packets)"))
+                            .range(500..=1000000)
+                            .display_format(im_str!("%d µs"))
+                            .build(ui, &mut tx_send_interval_us);
                     }
                 }
 
