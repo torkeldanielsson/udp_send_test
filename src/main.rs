@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use core::cmp;
 use glium::glutin;
 use glium::glutin::event::{Event, WindowEvent};
@@ -90,7 +92,7 @@ fn init(title: &str) -> System {
     let context = glutin::ContextBuilder::new().with_vsync(true);
     let builder = WindowBuilder::new()
         .with_title(title.to_owned())
-        .with_inner_size(glutin::dpi::LogicalSize::new(1024f64, 768f64));
+        .with_inner_size(glutin::dpi::LogicalSize::new(1000f64, 200f64));
     let display =
         Display::new(builder, context, &event_loop).expect("Failed to initialize display");
 
@@ -173,7 +175,7 @@ fn main() {
         .ok(),
     );
 
-    let mut stat_length_s: f32 = 10.0;
+    let mut stat_length_s: f32 = 5.0;
 
     system.main_loop(move |_, ui| {
         let view_size = ui.io().display_size;
